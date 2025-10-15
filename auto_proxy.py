@@ -23,14 +23,16 @@ class Proxy:
 
     def scrap(self, sources, proxy_type):
         for source_url in [s for s in sources if s]:
-            try: response = requests.get(
-                source_url, timeout=15, 
-                headers={'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/106.0.0.0 Safari/537.36'}
-            )
-            except Exception as e: logger(e)
-            if tuple(REGEX.finditer(response.text)):
-                for proxy in tuple(REGEX.finditer(response.text)):
-                    self.proxies.append( (proxy_type, proxy.group(1)) )
+            try:
+                response = requests.get(
+                    source_url, timeout=15,
+                    headers={'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/106.0.0.0 Safari/537.36'}
+                )
+                if tuple(REGEX.finditer(response.text)):
+                    for proxy in tuple(REGEX.finditer(response.text)):
+                        self.proxies.append( (proxy_type, proxy.group(1)) )
+            except Exception as e:
+                logger(e)
 
 
     def init(self):
