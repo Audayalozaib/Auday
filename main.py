@@ -92,6 +92,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_path = f"download_{query.from_user.id}"
     
     ydl_opts = YDL_OPTIONS_BASE.copy()
+    
+    # محاولة تحديد مسار ffmpeg تلقائياً لتجنب أخطاء Railway
+    ffmpeg_path = None
+    for path in ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg', 'ffmpeg']:
+        if os.path.exists(path) or os.access(path, os.X_OK):
+            ffmpeg_path = path
+            break
+            
     if mode == 'vid':
         ydl_opts.update({
             'format': 'best[ext=mp4]/best',
@@ -108,6 +116,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }],
             'outtmpl': f'{file_path}.%(ext)s',
             'max_filesize': MAX_FILE_SIZE,
+            'ffmpeg_location': ffmpeg_path if ffmpeg_path else 'ffmpeg'
         })
 
     try:
