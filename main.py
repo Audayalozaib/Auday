@@ -107,17 +107,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'max_filesize': MAX_FILE_SIZE,
         })
     else:
-        ydl_opts.update({
-            'format': 'bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'outtmpl': f'{file_path}.%(ext)s',
-            'max_filesize': MAX_FILE_SIZE,
-            'ffmpeg_location': ffmpeg_path if ffmpeg_path else 'ffmpeg'
-        })
+    ydl_opts.update({
+        'format': 'bestaudio/best',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+        'outtmpl': f'{file_path}.%(ext)s',
+        'max_filesize': MAX_FILE_SIZE,
+        'ffmpeg_location': '/nix/store'
+    })
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
