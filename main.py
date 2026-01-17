@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 # التوكن الخاص بالبوت (يقرأ من متغيرات البيئة أو يوضع يدوياً)
 import os
-BOT_TOKEN = os.getenv('BOT_TOKEN', '6741306329:AAF9gyhoD_li410vEdu62s7WlhZVVpKJu58')
+BOT_TOKEN = os.getenv('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
 
 # الحد الأقصى لحجم الملف (50 ميجابايت)
 MAX_FILE_SIZE = 50 * 1024 * 1024
@@ -24,7 +24,14 @@ MAX_FILE_SIZE = 50 * 1024 * 1024
 YDL_OPTIONS_BASE = {
     'quiet': True,
     'no_warnings': True,
-    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+    # استخدام واجهات مختلفة لتخطي حظر يوتيوب (مثل واجهة الأندرويد)
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['android', 'web'],
+            'skip': ['hls', 'dash']
+        }
+    },
+    'user_agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36',
     'referer': 'https://www.google.com/',
 }
 
@@ -166,5 +173,5 @@ if __name__ == '__main__':
     app.add_handler(InlineQueryHandler(inline_query))
     
     print("البوت يعمل الآن...")
-    app.run_polling()
-
+    # استخدام drop_pending_updates لتجنب تراكم الرسائل القديمة عند إعادة التشغيل
+    app.run_polling(drop_pending_updates=True)
