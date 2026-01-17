@@ -13,8 +13,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# التوكن الخاص بالبوت (يجب استبداله بالتوكن الحقيقي من BotFather)
-BOT_TOKEN = '6741306329:AAF9gyhoD_li410vEdu62s7WlhZVVpKJu58'
+# التوكن الخاص بالبوت (يقرأ من متغيرات البيئة أو يوضع يدوياً)
+import os
+BOT_TOKEN = os.getenv('BOT_TOKEN', '6741306329:AAF9gyhoD_li410vEdu62s7WlhZVVpKJu58')
 
 # الحد الأقصى لحجم الملف (50 ميجابايت)
 MAX_FILE_SIZE = 50 * 1024 * 1024
@@ -39,6 +40,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(welcome_text, parse_mode='Markdown')
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        return
     url = update.message.text
     if not re.match(r'http[s]?://', url):
         return
@@ -164,3 +167,4 @@ if __name__ == '__main__':
     
     print("البوت يعمل الآن...")
     app.run_polling()
+
