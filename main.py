@@ -1,7 +1,6 @@
 import os
 import re
 import logging
-import subprocess
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -21,7 +20,6 @@ from telegram.ext import (
 import yt_dlp
 
 # ================== إعدادات عامة ==================
-
 BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 FFMPEG_LOCATION = "/nix/store"   # الحل النهائي لـ Railway
@@ -33,12 +31,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ================== خيارات yt-dlp الأساسية ==================
-
 YDL_OPTIONS_BASE = {
     "quiet": True,
     "no_warnings": True,
     "user_agent": "Mozilla/5.0 (Linux; Android 10)",
     "referer": "https://www.google.com/",
+    "ffmpeg_location": FFMPEG_LOCATION,
     "concurrent_fragment_downloads": 5,
     "retries": 5,
     "fragment_retries": 5,
@@ -48,11 +46,9 @@ YDL_OPTIONS_BASE = {
             "skip": ["hls", "dash"]
         }
     },
-    "ffmpeg_location": FFMPEG_LOCATION,
 }
 
 # ================== أوامر البوت ==================
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 أهلاً بك في بوت التحميل\n\n"
@@ -62,7 +58,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ================== استقبال الروابط ==================
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -102,7 +97,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status.edit_text("❌ فشل في قراءة الرابط")
 
 # ================== أزرار التحميل ==================
-
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -166,7 +160,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             os.remove(filename)
 
 # ================== البحث بالإنلاين ==================
-
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.inline_query.query
     if not query:
@@ -196,7 +189,6 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.inline_query.answer(results)
 
 # ================== تشغيل البوت ==================
-
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
