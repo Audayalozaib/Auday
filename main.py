@@ -10,9 +10,8 @@ import handlers
 import database as db
 
 async def startup_bot(application):
-    """وظيفة تعمل فور بدء التشغيل"""
     print("🔄 Connecting to Cloud Database (Channel)...")
-    await db.init_db(application.bot)
+    await db.init_db(application)
     print("✅ Database Connected & Synced")
 
 def main():
