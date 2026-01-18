@@ -10,7 +10,7 @@ WORKDIR /app
 # نسخ ملف المتطلبات وتثبيتها
 # ملاحظة: تم إضافة [job-queue] لحل مشكلة JobQueue
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt "python-telegram-bot[job-queue]"
+RUN pip install --no-cache-dir -r requirements.txt "python-telegram-bot[job-queue]=20.8"
 
 # نسخ باقي ملفات البوت
 COPY . .
