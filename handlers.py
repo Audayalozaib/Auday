@@ -75,17 +75,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(f"⏳ جاري تحميل {mode_name}...")
     
     try:
-        # استيراد executor و active_downloads من main (سنقوم بتعريفهم في main وتمريرهم أو استخدام global imports)
-        # لتبسيط الكود سنستخدم الطريقة المباشرة مع loop
-        loop = context.application.loop
+        # الحل: استخدام asyncio.get_event_loop() بدلاً من context.application.loop
+        loop = asyncio.get_event_loop()
         
-        # نحتاج لتمرير الـ executor، سنفترض أنه موجود في main كمتغير عام
-        # لكن للنظافة، سنقوم بتعريفه كـ global داخل utils أو import
-        # هنا سنفترض أنك عرفت executor في main واستوردته
-        from main import executor 
+        # الحل: لكي نستخدم executor المعرف في main، سنقوم بتمريره عبر context.user_data مؤقتاً
+        # أو ببساطة سنقوم بتعريف import في أعلى الملف handlers.py بداخل main.
+        # للتبسيط الآن، سنقوم باستخدام Executor محلي للمعالجة إذا لم تستطع جلبه من main
+        # لكن الأفضل: أضف هذا الاستيراد في أعلى ملف handlers.py:
+        from main import executor
         
         result = await loop.run_in_executor(executor, download_media, url, mode_key, query.from_user.id)
-        filename, file_size = result
+        # ... بقية الكود ...
         
         # حذف رسالة التحميل
         try: await context.bot.delete_message(query.message.chat_id, query.message.message_id)
