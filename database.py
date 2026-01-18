@@ -1,64 +1,73 @@
-import sqlite3
+import json
 import logging
-import os
-from datetime import datetime
-from config import DB_NAME
+import asyncio
+from typing import Dict, List
+from io import BytesIO
+
+from config import LOG_CHANNEL_ID
 
 logger = logging.getLogger(__name__)
 
-def init_db():
-    """تهيئة قاعدة البيانات"""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            url TEXT,
-            title TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    conn.commit()
-    conn.close()
+HISTORY_FILENAME = "history.json"
+# التخزين المؤقت في الذاكرة
+user_history: Dict[int, List[dict]] = {}
 
-def add_to_history(user_id: int, url: str, title: str):
-    """إضافة رابط للسجل"""
-    try:
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO history (user_id, url, title) VALUES (?, ?, ?)", (user_id, url, title[:100]))
-        conn.commit()
-        conn.close()
-        # الاحتفاظ بآخر 10 فقط
-        clean_old_history(user_id)
-    except Exception as e:
-        logger.error(f"DB Error: {e}")
+async def init_db(bot):
+    """تحميل البيانات من القناة عند بدء التشغيل"""
+    global user_history
+    if not LOG_CHANNEL_ID:
+        logger.warning("LOG_CHANNEL_ID not set, skipping DB init.")
+        return
 
-def get_history(user_id: int):
-    """جلب آخر 10 سجلات"""
     try:
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute("SELECT url, title FROM history WHERE user_id=? ORDER BY id DESC LIMIT 10", (user_id,))
-        rows = cursor.fetchall()
-        conn.close()
-        return rows
-    except Exception as e:
-        logger.error(f"DB Error: {e}")
-        return []
+        logger.info("🔍 Searching for history database in channel...")
+        # البحث عن آخر 10 رسائل للعثور على ملف التاريخ
+        async for message in bot.get_chat_history(chat_id=LOG_CHANNEL_ID, limit=10):
+            if message.document and message.document.file_name == HISTORY_FILENAME:
+                # تم العثور على الملف، تحميله
+                file = await message.document.get_file()
+                content = await file.download_as_bytearray()
+                user_history = json.loads(content.decode('utf-8'))
+                logger.info(f"✅ History loaded from channel. Users: {len(user_history)}")
+                return
+        
+        # إذا لم يتم العثور عليه
+        logger.info("🆔 No history file found in channel. Starting with empty DB.")
+        user_history = {}
 
-def clean_old_history(user_id: int):
-    """حذف السجلات القديمة (الاحتفاظ بـ 10 فقط)"""
-    try:
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute("""
-            DELETE FROM history WHERE id NOT IN (
-                SELECT id FROM history WHERE user_id=? ORDER BY id DESC LIMIT 10
-            )
-        """, (user_id,))
-        conn.commit()
-        conn.close()
     except Exception as e:
-        pass
+        logger.error(f"❌ Failed to load history: {e}")
+        user_history = {}
+
+async def add_to_history(bot, user_id: int, url: str, title: str):
+    """إضافة عملية تحميل وتحديث القناة"""
+    global user_history
+    if not LOG_CHANNEL_ID:
+        return
+
+    user_id_str = str(user_id)
+    if user_id_str not in user_history:
+        user_history[user_id_str] = []
+    
+    # إضافة جديد
+    user_history[user_id_str].insert(0, {"url": url, "title": title})
+    
+    # الاحتفاظ بآخر 10 فقط
+    if len(user_history[user_id_str]) > 10:
+        user_history[user_id_str] = user_history[user_id_str][:10]
+    
+    # حفظ التغييرات في القناة
+    try:
+        json_data = json.dumps(user_history)
+        f = BytesIO(json_data.encode('utf-8'))
+        f.name = HISTORY_FILENAME
+        
+        # إرسال الملف الجديد للقناة
+        await bot.send_document(LOG_CHANNEL_ID, document=f, caption="🔄 Updated Database")
+        logger.info(f"✅ History saved for user {user_id}")
+    except Exception as e:
+        logger.error(f"❌ Failed to save history: {e}")
+
+def get_history(user_id: int) -> List[dict]:
+    """جلب السجل من الذاكرة"""
+    return user_history.get(str(user_id), [])
