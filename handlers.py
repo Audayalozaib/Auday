@@ -116,9 +116,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result = await loop.run_in_executor(executor, download_media, url, mode_key, query.from_user.id)
         filename, file_size = result
         
-        # حفظ في السجل (قاعدة البيانات في القناة)
+        # حفظ في السجل (تم التعديل: استخدام context.application بدلاً من context.bot)
         title = context.user_data.get('last_info', {}).get('title', 'Video')
-        await db.add_to_history(context.bot, query.from_user.id, url, title)
+        await db.add_to_history(context.application, query.from_user.id, url, title)
         
         # حذف رسالة التحميل
         try: await context.bot.delete_message(query.message.chat_id, query.message.message_id)
@@ -140,8 +140,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # رفع الملف للقناة
                 sent_msg = await context.bot.send_video(LOG_CHANNEL_ID, f, caption=f"Backup: {title}")
                 
-                # إنشاء رابط للقناة (للمستخدمين الذين هم أعضاء)
-                # ملاحظة: يجب أن يكون المستخدم مشتركاً في القناة ليعمل الرابط
+                # إنشاء رابط للقناة (يجب أن يكون المستخدم مشتركاً)
                 file_link = f"https://t.me/c/{str(LOG_CHANNEL_ID)[4:]}/{sent_msg.message_id}"
                 
                 await context.bot.send_message(
