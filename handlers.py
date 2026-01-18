@@ -7,39 +7,53 @@ from io import BytesIO
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent, constants
 from telegram.ext import ContextTypes, CallbackQueryHandler, InlineQueryHandler, CommandHandler, MessageHandler, filters
 
+import yt_dlp
+
 from config import MAX_FILE_SIZE, MAX_DURATION, DEVELOPER_ID, LOG_CHANNEL_ID
 from utils import validate_url, format_file_size, cleanup_files, download_media, executor, get_smart_buttons
 import database as db
-import yt_dlp
 
 logger = logging.getLogger(__name__)
 
+# ==================== الأوامر ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    text = f"👋 **أهلاً بك يا {user.first_name}!**\n🎬 أرسل رابط الفيديو لأحمله لك.\n\n📂 استخدم `/history` لرؤية آخر تحميلاتك."
+    text = f"""
+👋 **أهلاً بك يا {user.first_name}!**
+
+🎬 **بوت التحميل المتطور**:
+• يدعم اليوتيوب، تيك توك، انستجرام...
+• يرفع الملفات الكبيرة تلقائياً للقناة.
+• يحفظ سجل تحميلاتك.
+
+📂 أرسل رابط الفيديو الآن، أو اكتب `/history` لرؤية آخر تحميلاتك.
+    """
     await update.message.reply_text(text, parse_mode=constants.ParseMode.MARKDOWN)
 
 async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """عرض سجل التحميلات"""
+    """عرض سجل التحميلات من القناة"""
     user_id = update.effective_user.id
     rows = db.get_history(user_id)
     
     if not rows:
-        await update.message.reply_text("لا يوجد سجل تحميلات سابق.")
+        await update.message.reply_text("📂 لا يوجد سجل تحميلات سابق.")
         return
         
     text = "📂 **آخر 10 تحميلات:**\n\n"
-    for i, (url, title) in enumerate(rows, 1):
+    for i, item in enumerate(rows, 1):
+        title = item.get('title', 'Unknown')
+        url = item.get('url', '')
         text += f"{i}. {title}\n{url}\n\n"
     
     await update.message.reply_text(text, parse_mode=constants.ParseMode.MARKDOWN)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("أرسل أي رابط.", parse_mode=constants.ParseMode.MARKDOWN)
+    await update.message.reply_text("أرسل أي رابط يوتيوب أو تيك توك وسأقوم بتحميله.", parse_mode=constants.ParseMode.MARKDOWN)
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🟢 البوت يعمل بشكل طبيعي", parse_mode=constants.ParseMode.MARKDOWN)
+    await update.message.reply_text("🟢 البوت يعمل بشكل طبيعي\n📂 قاعدة البيانات: متصلة بالقناة", parse_mode=constants.ParseMode.MARKDOWN)
 
+# ==================== الرسائل ====================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text: return
     
@@ -53,7 +67,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_msg = await update.message.reply_text("🔍 جاري الفحص...")
     
     try:
-        # استخدام خيارات بسيطة للفحص السريع
+        # خيارات خفيفة للفحص فقط
         opts = {"quiet": True, "no_warnings": True}
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -61,22 +75,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         title = info.get("title", "Video")[:50]
         uploader = info.get("uploader", "Unknown")
         
-        # استخدام الأزرار الذكية
+        # استخدام الأزرار الذكية حسب الرابط
         keyboard = get_smart_buttons(url)
         
         text = f"✅ **{title}**\n👤 {uploader}"
         await status_msg.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=constants.ParseMode.MARKDOWN)
         
+        # حفظ المعلومات المؤقتة
         context.user_data['last_info'] = info
 
     except Exception as e:
         await status_msg.edit_text(f"❌ حدث خطأ: {str(e)}")
 
+# ==================== الأزرار ====================
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    # تحليل الأمر: mode|url
+    # تحليل البيانات
     try:
         parts = query.data.split("|", 1)
         mode = parts[0]
@@ -84,9 +100,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         return
 
-    # إذا كان الرابط المباشر
+    # حالة الرابط المباشر
     if mode == "url":
-        # نرسل الرابط فقط
         await query.edit_message_text(f"🔗 **الرابط المباشر:**\n{url}", parse_mode=constants.ParseMode.MARKDOWN)
         return
 
@@ -96,41 +111,44 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(f"⏳ جاري تحميل {mode_name}...")
     
     try:
+        # تشغيل التحميل في الخلفية
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(executor, download_media, url, mode_key, query.from_user.id)
         filename, file_size = result
         
-        # حفظ في السجل
+        # حفظ في السجل (قاعدة البيانات في القناة)
         title = context.user_data.get('last_info', {}).get('title', 'Video')
-        db.add_to_history(query.from_user.id, url, title)
+        await db.add_to_history(context.bot, query.from_user.id, url, title)
         
+        # حذف رسالة التحميل
         try: await context.bot.delete_message(query.message.chat_id, query.message.message_id)
         except: pass
 
         with open(filename, "rb") as f:
             thumb = None
+            # محاولة جلب الصورة المصغرة للصوت
             if mode_key == "audio" and context.user_data.get('last_info', {}).get('thumbnail'):
                 try:
                     r = requests.get(context.user_data['last_info']['thumbnail'], stream=True)
                     if r.status_code == 200: thumb = BytesIO(r.content)
                 except: pass
             
-            # التحقق من الحجم للتحميل المباشر
+            # التحقق من الحجم: نسخة احتياطية للقناة إذا كان كبيراً
             if file_size > MAX_FILE_SIZE:
-                # ملف كبير جداً للإرسال المباشر -> رفع للقناة (Cloud Backup)
-                await context.bot.send_message(query.message.chat_id, "📦 الملف كبير، جاري الرفع للسحابة...")
+                await context.bot.send_message(query.message.chat_id, "📦 الملف كبير جداً، جاري الرفع للسحابة...")
                 
-                # الرفع للقناة
+                # رفع الملف للقناة
                 sent_msg = await context.bot.send_video(LOG_CHANNEL_ID, f, caption=f"Backup: {title}")
                 
-                # إرسال الرابط للمستخدم
+                # إنشاء رابط للقناة (للمستخدمين الذين هم أعضاء)
+                # ملاحظة: يجب أن يكون المستخدم مشتركاً في القناة ليعمل الرابط
                 file_link = f"https://t.me/c/{str(LOG_CHANNEL_ID)[4:]}/{sent_msg.message_id}"
+                
                 await context.bot.send_message(
                     query.message.chat_id, 
-                    f"✅ تم التحميل في السحابة!\n🔗 [اضغط هنا للتحميل]({file_link})\n\n📏 الحجم: {format_file_size(file_size)}",
+                    f"✅ **تم التحميل في السحابة!**\n🔗 [اضغط هنا للتحميل]({file_link})\n\n📏 الحجم: {format_file_size(file_size)}",
                     parse_mode=constants.ParseMode.MARKDOWN
                 )
-                
             else:
                 # إرسال عادي
                 if mode_key == "audio":
@@ -142,7 +160,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         logger.error(f"Error: {e}")
-        await query.edit_message_text(f"❌ فشل التحميل.\n\n{str(e)}")
+        await query.edit_message_text(f"❌ فشل التحميل.\n\nالخطأ: {str(e)[:200]}")
 
 # ==================== البحث ====================
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -166,5 +184,6 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except: pass
     await update.inline_query.answer(results)
 
+# ==================== الأخطاء ====================
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    logger.error(f"Error: {context.error}")
+    logger.error(f"Update {update} caused error {context.error}")
