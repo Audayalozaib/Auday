@@ -19,8 +19,9 @@ logger = logging.getLogger(__name__)
 
 # حالة النظام المشتركة
 active_downloads: Dict[int, Dict[str, Any]] = {}
-download_lock = ... # سيتم تعريفه في main أو يمكن استخدام asyncio.Lock() عام
-executor = ... # سيتم تعريفه في main
+# تعريف Executor هنا ليتم استخدامه في handlers بدون تعارض
+from concurrent.futures import ThreadPoolExecutor
+executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_DOWNLOADS)
 
 # ==================== إعدادات yt-dlp ====================
 YDL_OPTIONS_BASE = {
@@ -58,7 +59,6 @@ def get_ydl_options(mode: str, user_id: int) -> dict:
     opts["prefer_ffmpeg"] = True
     opts["hls_prefer_native"] = True
 
-    # استخدام مجلد مؤقت
     temp_dir = tempfile.gettempdir()
     os.makedirs(temp_dir, exist_ok=True)
     file_prefix = os.path.join(temp_dir, f"dl_{user_id}_{int(datetime.datetime.now().timestamp())}")
@@ -123,7 +123,7 @@ def cleanup_files(*file_paths: str) -> None:
             logger.warning(f"Failed to cleanup {path}: {e}")
 
 def download_media(url: str, mode: str, user_id: int) -> tuple:
-    """دالة التحميل الأساسية (تعمل في Thread)"""
+    """دالة التحميل الأساسية"""
     filename = None
     try:
         ydl_opts = get_ydl_options(mode, user_id)
