@@ -19,9 +19,19 @@ async def init_db(application):
         return
 
     try:
+        bot = application.bot
+        
+        # التحقق مما إذا كانت المكتبة تدعم هذه الدالة (للنسخ القديمة)
+        if not hasattr(bot, 'get_chat_history'):
+            logger.error("⚠️ إصدار python-telegram-bot قديم جداً ولا يدعم جلب السجل.")
+            logger.error("⚠️ يرجى تحديث requirements.txt. تعطيل قاعدة البيانات حالياً.")
+            user_history = {}
+            return
+
         logger.info("🔍 Searching for history database in channel...")
-        # استخدام application بدلاً من bot
-        async for message in application.get_chat_history(chat_id=LOG_CHANNEL_ID, limit=20):
+        
+        # استخدام bot.get_chat_history بشكل صحيح
+        async for message in bot.get_chat_history(chat_id=LOG_CHANNEL_ID, limit=20):
             if message.document and message.document.file_name == HISTORY_FILENAME:
                 file = await message.document.get_file()
                 content = await file.download_as_bytearray()
@@ -34,6 +44,7 @@ async def init_db(application):
 
     except Exception as e:
         logger.error(f"❌ Failed to load history: {e}")
+        # في حالة الفشل، نبدأ بقاعدة بيانات فارغة لكي لا يتوقف البوت
         user_history = {}
 
 async def add_to_history(application, user_id: int, url: str, title: str):
@@ -55,8 +66,8 @@ async def add_to_history(application, user_id: int, url: str, title: str):
         f = BytesIO(json_data.encode('utf-8'))
         f.name = HISTORY_FILENAME
         
-        # استخدام application.send_document
-        await application.send_document(LOG_CHANNEL_ID, document=f, caption="🔄 Updated Database")
+        # استخدام application.bot.send_document
+        await application.bot.send_document(LOG_CHANNEL_ID, document=f, caption="🔄 Updated Database")
         logger.info(f"✅ History saved for user {user_id}")
     except Exception as e:
         logger.error(f"❌ Failed to save history: {e}")
