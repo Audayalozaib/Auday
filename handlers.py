@@ -2,6 +2,7 @@ import logging
 import os
 import asyncio # استيراد asyncio لإصلاح مشكلة الـ loop
 import requests
+import yt_dlp
 from io import BytesIO
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent, constants
