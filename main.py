@@ -7,15 +7,17 @@ logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=lo
 
 from config import BOT_TOKEN
 import handlers
-import database as db # استيراد قاعدة البيانات
+import database as db
+
+async def startup_bot(application):
+    """وظيفة تعمل فور بدء التشغيل"""
+    print("🔄 Connecting to Cloud Database (Channel)...")
+    await db.init_db(application.bot)
+    print("✅ Database Connected & Synced")
 
 def main():
     print("🚀 Starting Bot...")
     
-    # تهيئة قاعدة البيانات
-    db.init_db()
-    print("✅ Database Connected")
-
     if shutil.which("ffmpeg"):
         print("✅ FFmpeg Ready")
     else:
@@ -23,15 +25,19 @@ def main():
 
     app = ApplicationBuilder().token(BOT_TOKEN).concurrent_updates(True).build()
 
+    # تسجيل المعالجات
     app.add_handler(CommandHandler("start", handlers.start))
     app.add_handler(CommandHandler("help", handlers.help_command))
     app.add_handler(CommandHandler("status", handlers.status_command))
-    app.add_handler(CommandHandler("history", handlers.history_command)) # جديد
+    app.add_handler(CommandHandler("history", handlers.history_command))
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_message))
     app.add_handler(CallbackQueryHandler(handlers.button_callback))
     app.add_handler(InlineQueryHandler(handlers.inline_query))
     app.add_error_handler(handlers.error_handler)
+    
+    # ربط وظيفة بدء التشغيل
+    app.post_init = startup_bot
 
     print("✅ Bot is running!")
     app.run_polling(drop_pending_updates=True)
