@@ -1,5 +1,6 @@
 import logging
 import os
+import asyncio # استيراد asyncio لإصلاح مشكلة الـ loop
 import requests
 from io import BytesIO
 
@@ -7,28 +8,24 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQ
 from telegram.ext import ContextTypes, CallbackQueryHandler, InlineQueryHandler, CommandHandler, MessageHandler, filters
 
 from config import MAX_FILE_SIZE, MAX_DURATION, DEVELOPER_ID
-from utils import validate_url, format_file_size, cleanup_files, download_media, get_ydl_options, YDL_OPTIONS_BASE
-import yt_dlp
+from utils import (
+    validate_url, format_file_size, cleanup_files, download_media, 
+    get_ydl_options, YDL_OPTIONS_BASE, active_downloads, executor # استيراد executor من utils
+)
 
 logger = logging.getLogger(__name__)
 
 # ==================== الأوامر ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    text = f"""
-👋 **أهلاً بك يا {user.first_name}!**
-🎬 أرسل رابط الفيديو لأحمله لك فوراً.
-    """
+    text = f"👋 **أهلاً بك يا {user.first_name}!**\n🎬 أرسل رابط الفيديو لأحمله لك."
     await update.message.reply_text(text, parse_mode=constants.ParseMode.MARKDOWN)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("أرسل أي رابط يوتيوب أو تيك توك وسأقوم بتحميله.", parse_mode=constants.ParseMode.MARKDOWN)
+    await update.message.reply_text("أرسل أي رابط يوتيوب أو تيك توك.", parse_mode=constants.ParseMode.MARKDOWN)
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # سيتم استيراد active_downloads من main عبر السياق أو المتغير العام
-    # للتبسيط سنفترض وجوده
-    text = "🟢 البوت يعمل بشكل طبيعي"
-    await update.message.reply_text(text, parse_mode=constants.ParseMode.MARKDOWN)
+    await update.message.reply_text("🟢 البوت يعمل بشكل طبيعي", parse_mode=constants.ParseMode.MARKDOWN)
 
 # ==================== الرسائل ====================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -75,17 +72,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(f"⏳ جاري تحميل {mode_name}...")
     
     try:
-        # الحل: استخدام asyncio.get_event_loop() بدلاً من context.application.loop
+        # الإصلاح: استخدام asyncio.get_event_loop()
         loop = asyncio.get_event_loop()
         
-        # الحل: لكي نستخدم executor المعرف في main، سنقوم بتمريره عبر context.user_data مؤقتاً
-        # أو ببساطة سنقوم بتعريف import في أعلى الملف handlers.py بداخل main.
-        # للتبسيط الآن، سنقوم باستخدام Executor محلي للمعالجة إذا لم تستطع جلبه من main
-        # لكن الأفضل: أضف هذا الاستيراد في أعلى ملف handlers.py:
-        from main import executor
-        
+        # استدعاء download_media باستخدام executor من utils
         result = await loop.run_in_executor(executor, download_media, url, mode_key, query.from_user.id)
-        # ... بقية الكود ...
+        filename, file_size = result
         
         # حذف رسالة التحميل
         try: await context.bot.delete_message(query.message.chat_id, query.message.message_id)
@@ -108,7 +100,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         logger.error(f"Error: {e}")
-        await query.edit_message_text("❌ فشل التحميل")
+        # الإصلاح: إرسال الخطأ للمستخدم لنعرف سببه
+        await query.edit_message_text(f"❌ فشل التحميل.\n\nالخطأ: {str(e)[:200]}")
 
 # ==================== البحث ====================
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
