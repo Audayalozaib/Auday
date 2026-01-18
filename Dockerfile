@@ -16,4 +16,4 @@ RUN pip install --no-cache-dir -r requirements.txt "python-telegram-bot[job-queu
 COPY . .
 
 # الأمر لتشغيل البوت
-CMD ["python", "perfect_download_bot.py"]
+CMD ["python", "main.py"]
