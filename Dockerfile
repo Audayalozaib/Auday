@@ -1,19 +1,24 @@
-# استخدام صورة بايثون خفيفة
 FROM python:3.11-slim
 
-# تحديث الحزم وتثبيت FFmpeg
+# تحديث النظام وتثبيت FFmpeg
 RUN apt-get update && apt-get install -y ffmpeg
 
-# تعيين مجلد العمل
 WORKDIR /app
 
-# نسخ ملف المتطلبات وتثبيتها
-# ملاحظة: تم إضافة [job-queue] لحل مشكلة JobQueue
+# نسخ ملف المتطلبات
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt "python-telegram-bot[job-queue]=20.8"
 
-# نسخ باقي ملفات البوت
+# ==================== الإجبار على التحديث ====================
+# 1. إلغاء تثبيت python-telegram-bot القديمة إن وجدت
+RUN pip uninstall python-telegram-bot -y || true
+
+# 2. تثبيت نسخة محددة وحديثة مباشرة (بدلاً من الاعتماد فقط على requirements.txt)
+RUN pip install "python-telegram-bot==20.8" "python-telegram-bot[job-queue]" --upgrade
+
+# 3. تثبيت باقي المكتبات
+RUN pip install --no-cache-dir -r requirements.txt
+
+# نسخ ملفات البوت
 COPY . .
 
-# الأمر لتشغيل البوت
 CMD ["python", "main.py"]
