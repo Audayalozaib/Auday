@@ -21,21 +21,23 @@ logger = logging.getLogger(__name__)
 active_downloads: Dict[int, Dict[str, Any]] = {}
 executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_DOWNLOADS)
 
+# ==================== إعدادات yt-dlp المحسنة (وضع Android) ====================
 YDL_OPTIONS_BASE = {
     "quiet": True,
     "no_warnings": True,
-    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    # تظاهر بأنك تطبيق يوتيوب على أندرويد (تجاوز ناجح للحظر)
+    "user_agent": "com.google.android.youtube/17.36.4 (Linux; U; Android 12; GB) gzip",
     "referer": "https://www.google.com/",
-    "concurrent_fragment_downloads": 5,
-    "retries": 5,
-    "fragment_retries": 5,
+    "concurrent_fragment_downloads": 3, # تقليل التحميل المتزامن لتجنب الحظر
+    "retries": 10,
+    "fragment_retries": 10,
     "retry_sleep": lambda x: min(30, 2 ** x),
     # استكمال التحميل
     "continuedl": True,
     "nooverwrites": True,
     "extractor_args": {
         "youtube": {
-            "player_client": ["android", "web"],
+            "player_client": ["android"], # إجبار استخدام عميل أندرويد
             "skip": ["hls", "dash"],
             "max_comments": 0,
         }
@@ -44,15 +46,6 @@ YDL_OPTIONS_BASE = {
         "ffmpeg": ["-avoid_negative_ts", "make_zero"]
     }
 }
-
-def get_proxy():
-    """جلب عنوان البروكسي تلقائياً من البيئة (مثل Railway)"""
-    # يوتيوب يحتاج غالباً لبروكسي خارجي
-    # Railway لا يوفر بروكسي سحابي افتراضي، لذا سنبحث عن متغيرات
-    # أو يمكنك تعيين متغير 'HTTP_PROXY' في Railway Variables
-    
-    proxy_url = os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
-    return proxy_url
 
 def get_ydl_options(mode: str, user_id: int) -> dict:
     opts = YDL_OPTIONS_BASE.copy()
@@ -67,11 +60,11 @@ def get_ydl_options(mode: str, user_id: int) -> dict:
     os.makedirs(temp_dir, exist_ok=True)
     file_prefix = os.path.join(temp_dir, f"dl_{user_id}_{int(datetime.datetime.now().timestamp())}")
     
-    # إضافة البروكسي إذا وجد
-    proxy = get_proxy()
-    if proxy:
-        opts["proxy"] = proxy
-        logger.info(f"✅ Using Proxy: {proxy}")
+    # إذا قمت بإضافة متغير HTTP_PROXY في Railway لاحقاً فسيتم تفعيله تلقائياً
+    proxy_url = os.getenv("HTTP_PROXY")
+    if proxy_url:
+        opts["proxy"] = proxy_url
+        logger.info(f"✅ Using Proxy: {proxy_url}")
     
     if mode == "info":
         opts["download"] = False
