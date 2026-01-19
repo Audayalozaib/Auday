@@ -8,7 +8,7 @@ import datetime
 import asyncio
 from typing import Optional, Dict, Any, Tuple
 from concurrent.futures import ThreadPoolExecutor
-from telegram import InlineKeyboardButton
+
 import yt_dlp
 
 from config import (
@@ -45,6 +45,15 @@ YDL_OPTIONS_BASE = {
     }
 }
 
+def get_proxy():
+    """جلب عنوان البروكسي تلقائياً من البيئة (مثل Railway)"""
+    # يوتيوب يحتاج غالباً لبروكسي خارجي
+    # Railway لا يوفر بروكسي سحابي افتراضي، لذا سنبحث عن متغيرات
+    # أو يمكنك تعيين متغير 'HTTP_PROXY' في Railway Variables
+    
+    proxy_url = os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
+    return proxy_url
+
 def get_ydl_options(mode: str, user_id: int) -> dict:
     opts = YDL_OPTIONS_BASE.copy()
     
@@ -58,6 +67,12 @@ def get_ydl_options(mode: str, user_id: int) -> dict:
     os.makedirs(temp_dir, exist_ok=True)
     file_prefix = os.path.join(temp_dir, f"dl_{user_id}_{int(datetime.datetime.now().timestamp())}")
     
+    # إضافة البروكسي إذا وجد
+    proxy = get_proxy()
+    if proxy:
+        opts["proxy"] = proxy
+        logger.info(f"✅ Using Proxy: {proxy}")
+    
     if mode == "info":
         opts["download"] = False
         return opts
@@ -70,7 +85,6 @@ def get_ydl_options(mode: str, user_id: int) -> dict:
             "max_filesize": MAX_FILE_SIZE,
             "postprocessors": [
                 {"key": "FFmpegVideoRemuxer", "preferedformat": "mp4"},
-                # تضمين الصورة المصغرة
                 {"key": "FFmpegMetadata"},
             ],
         })
@@ -82,7 +96,7 @@ def get_ydl_options(mode: str, user_id: int) -> dict:
             "postprocessors": [
                 {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"},
                 {"key": "FFmpegMetadata"},
-                {"key": "EmbedThumbnail"} # تضمين صورة الغلاف
+                {"key": "EmbedThumbnail"}
             ],
         })
     
@@ -95,7 +109,7 @@ def validate_url(url: str) -> Optional[str]:
         r"^https?://(www\.)?tiktok\.com/", r"^https?://(www\.)?instagram\.com/",
         r"^https?://(www\.)?twitter\.com/", r"^https?://(www\.)?x\.com/",
         r"^https?://(www\.)?facebook\.com/", r"^https?://(www\.)?pinterest\.com/",
-        r"^https?://soundcloud\.com/", # دعم ساوند كلاود
+        r"^https?://soundcloud\.com/", 
     ]
     for pattern in patterns:
         if re.match(pattern, url): return url
@@ -117,6 +131,7 @@ def download_media(url: str, mode: str, user_id: int) -> Tuple[str, int]:
     filename = None
     try:
         ydl_opts = get_ydl_options(mode, user_id)
+        
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             temp_template = ydl.prepare_filename(info)
@@ -144,20 +159,13 @@ def download_media(url: str, mode: str, user_id: int) -> Tuple[str, int]:
         if filename: cleanup_files(filename)
         raise
 
-# دالة مساعدة لتحديد الأزرار بناءً على الرابط (الوضع الذكي)
 def get_smart_buttons(url: str):
+    from telegram import InlineKeyboardButton
     if "soundcloud.com" in url or "spotify.com" in url:
-        # فقط صوت للموسيقى
-        return [
-            [InlineKeyboardButton("🎵 MP3", callback_data=f"aud|{url}")]
-        ]
+        return [[InlineKeyboardButton("🎵 MP3", callback_data=f"aud|{url}")]]
     elif "tiktok.com" in url:
-        # تيك توك الأفضل كفيديو
-        return [
-            [InlineKeyboardButton("🎬 بدون علامة مائية", callback_data=f"vid|{url}")]
-        ]
+        return [[InlineKeyboardButton("🎬 بدون علامة مائية", callback_data=f"vid|{url}")]]
     else:
-        # الافتراضي (يوتيوب، فيسبوك، إلخ)
         return [
             [InlineKeyboardButton("🎬 MP4", callback_data=f"vid|{url}"),
              InlineKeyboardButton("🎵 MP3", callback_data=f"aud|{url}")],
