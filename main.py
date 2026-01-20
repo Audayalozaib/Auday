@@ -4,7 +4,7 @@ import random
 import json
 import os
 from functools import lru_cache
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from telegram.error import BadRequest
 
@@ -25,7 +25,7 @@ USERS_DB = "users.json"
 
 # معرفات ثابتة
 GENRE_ID_ANIMATION = 16
-CACHE_SIZE = 100  # عدد الطلبات المحفوظة في الذاكرة
+CACHE_SIZE = 100
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
@@ -44,8 +44,11 @@ def save_user(user_id):
     users = load_users()
     if user_id not in users:
         users.append(user_id)
-        with open(USERS_DB, 'w') as f:
-            json.dump(users, f)
+        try:
+            with open(USERS_DB, 'w') as f:
+                json.dump(users, f)
+        except Exception as e:
+            logging.error(f"Error saving user: {e}")
 
 async def is_subscribed(user_id, bot):
     try:
@@ -54,13 +57,15 @@ async def is_subscribed(user_id, bot):
     except Exception:
         return False
 
-# --- وظائف TMDB (مع التخزين المؤقت لتحسين السرعة) ---
+# --- وظائف TMDB (مع التخزين المؤقت) ---
 
 @lru_cache(maxsize=CACHE_SIZE)
 def fetch_tmdb(url):
     try:
-        return requests.get(url).json()
-    except:
+        # استخدام timeout لتجنب تعليق البوت
+        return requests.get(url, timeout=10).json()
+    except Exception as e:
+        logging.error(f"TMDB API Error: {e}")
         return None
 
 def get_genres(media_type='movie'):
@@ -69,7 +74,6 @@ def get_genres(media_type='movie'):
     return data.get('genres', []) if data else []
 
 def get_trending(media_type='movie'):
-    # يومي أو أسبوعي (day/week)
     url = f"{TMDB_BASE_URL}/trending/{media_type}/day?api_key={TMDB_API_KEY}&language=ar"
     data = fetch_tmdb(url)
     return data.get('results', []) if data else []
@@ -78,14 +82,12 @@ def get_random_item(media_type='movie', genre_id=None):
     page = random.randint(1, 30)
     url = f"{TMDB_BASE_URL}/discover/{media_type}?api_key={TMDB_API_KEY}&language=ar&sort_by=popularity.desc&page={page}"
     if genre_id: url += f"&with_genres={genre_id}"
-    
     data = fetch_tmdb(url)
     results = data.get('results', []) if data else []
     if results: return random.choice(results)
     return None
 
 def get_item_details(media_type, item_id):
-    # جلب تفاصيل شاملة: الممثلين، الفيديوهات، المشابهات
     url = f"{TMDB_BASE_URL}/{media_type}/{item_id}?api_key={TMDB_API_KEY}&language=ar&append_to_response=credits,videos,similar"
     return fetch_tmdb(url)
 
@@ -97,7 +99,7 @@ def get_collection_details(collection_id):
     url = f"{TMDB_BASE_URL}/collection/{collection_id}?api_key={TMDB_API_KEY}&language=ar"
     return fetch_tmdb(url)
 
-def search_items(query, media_type='multi'): # multi يبحث في الأفلام والمسلسلات والشخصيات
+def search_items(query, media_type='multi'):
     url = f"{TMDB_BASE_URL}/search/{media_type}?api_key={TMDB_API_KEY}&language=ar&query={query}&page=1"
     data = fetch_tmdb(url)
     return data.get('results', []) if data else []
@@ -109,7 +111,7 @@ def format_item_text(item, details=None, media_type='movie'):
     date = item.get('release_date') if media_type == 'movie' else item.get('first_air_date')
     year = date[:4] if date else '----'
     
-    # حماية النص من علامات HTML
+    # حماية النص
     safe_overview = overview.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
     
     icon = "🎬" if media_type == 'movie' else "📺"
@@ -127,7 +129,6 @@ def format_item_text(item, details=None, media_type='movie'):
             seasons = details.get('number_of_seasons')
             if seasons: text += f"\n🎞 المواسم: {seasons}"
         
-        # عرض 3 ممثلين فقط للإشارة، الأزرار ستكون بالأسفل
         cast = details.get('credits', {}).get('cast', [])[:3]
         if cast:
             actors = ", ".join([actor['name'] for actor in cast])
@@ -136,42 +137,54 @@ def format_item_text(item, details=None, media_type='movie'):
     text += f"\n\n📝 <b>القصة:</b>\n{safe_overview[:400]}..."
     return text
 
-# --- دوال مساعدة للإرسال والتعديل ---
+# --- دوال مساعدة للإرسال ---
 
-async def send_or_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, text, reply_markup=None, photo_url=None, video_url=None):
-    """دالة موحدة لإرسال رسالة جديدة أو تعديل الرسالة الحالية"""
+async def send_or_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, text, reply_markup=None, photo_url=None):
+    """دالة موحدة لإرسال أو تعديل الرسالة مع معالجة الأخطاء"""
     msg = None
     is_callback = bool(update.callback_query)
 
     try:
         if is_callback:
             msg = update.callback_query.message
+            
+            # إجبار المحاولة على الإجابة لمنع تحميل الزر
+            try: await update.callback_query.answer()
+            except: pass
+
             if photo_url:
+                # إذا كانت الرسالة الحالية صورة -> عدلها
                 if msg.photo:
                     await msg.edit_media(InputMediaPhoto(media=photo_url, caption=text, parse_mode='HTML'), reply_markup=reply_markup)
                 else:
-                    # إذا كانت الرسالة نصية ونريد تحويلها لصورة، نحذف ونعيد إرسال
-                    await msg.delete()
+                    # إذا كانت نصية -> احذف وأعد إرسال (لأن تحويل النص لصورة غير ممكن بالتعديل)
+                    try:
+                        await msg.delete()
+                    except:
+                        pass # تجاهل إذا لم نستطع الحذف
                     await context.bot.send_photo(chat_id=update.effective_chat.id, photo=photo_url, caption=text, reply_markup=reply_markup, parse_mode='HTML')
-            elif video_url:
-                 if msg.video: # دعم الفيديو نادر في بوستر الأفلام و لكن موجودة في التريلر
-                    await msg.edit_media(InputMediaVideo(media=video_url, caption=text, parse_mode='HTML'), reply_markup=reply_markup)
-                 else:
-                     await msg.delete()
-                     await context.bot.send_video(chat_id=update.effective_chat.id, video=video_url, caption=text, reply_markup=reply_markup, parse_mode='HTML')
             else:
-                await msg.edit_text(text, reply_markup=reply_markup, parse_mode='HTML')
+                # نص فقط
+                if msg.text or msg.caption:
+                    await msg.edit_text(text, reply_markup=reply_markup, parse_mode='HTML')
+                else:
+                    # كانت صورة و نريد نص -> احذف وأرسل نص
+                    try: await msg.delete()
+                    except: pass
+                    await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=reply_markup, parse_mode='HTML')
         else:
+            # رسالة جديدة (ليست callback)
             if photo_url:
                 await update.message.reply_photo(photo=photo_url, caption=text, reply_markup=reply_markup, parse_mode='HTML')
             else:
                 await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='HTML')
+                
     except BadRequest as e:
-        if "Message is not modified" in str(e): pass
-        elif "Message to edit not found" in str(e): pass
-        else: logging.error(f"Error in send_or_edit: {e}")
+        if "Message is not modified" in str(e) or "query is too old" in str(e): 
+            pass 
+        else: logging.error(f"BadRequest in send_or_edit: {e}")
     except Exception as e:
-        logging.error(f"Critical Error: {e}")
+        logging.error(f"Critical Error in send_or_edit: {e}")
 
 # --- المعالجات ---
 
@@ -210,40 +223,33 @@ async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         try:
             await query.delete_message()
         except: pass
-        # محاكاة start
         fake_update = Update(update_id=0, message=query.message)
         fake_update.message.from_user = query.from_user
         await start(fake_update, context)
     else:
         await query.answer("❌ لم تقم بالاشتراك بعد!", show_alert=True)
 
-# --- الأقسام الجديدة (ترند، ممثلين، مشابه) ---
+# --- أقسام الترند والمعلومات ---
 
 async def trending_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
     keyboard = [
         [InlineKeyboardButton("🔥 أفلام رائجة", callback_data='trending_movie')],
         [InlineKeyboardButton("📺 مسلسلات رائجة", callback_data='trending_tv')],
         [InlineKeyboardButton("🔙 رجوع", callback_data='back_to_start')]
     ]
-    try: await query.edit_message_text("📈 اختر قسم الترند:", reply_markup=InlineKeyboardMarkup(keyboard))
-    except: pass
+    await send_or_edit(update, context, "📈 اختر قسم الترند:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def show_trending_list(update: Update, context: ContextTypes.DEFAULT_TYPE, media_type='movie'):
-    query = update.callback_query
-    await query.answer()
-    
     results = get_trending(media_type)
     if not results:
-        await query.edit_message_text("❌ حدث خطأ في جلب البيانات.")
+        await send_or_edit(update, context, "❌ حدث خطأ في جلب البيانات.")
         return
 
-    # عرض أول 5 نتائج كقائمة
     text = f"🔥 <b>الأكثر رواجاً اليوم ({'أفلام' if media_type == 'movie' else 'مسلسلات'})</b>:\n\n"
     keyboard = []
-    for i, item in enumerate(results[:10]): # زيادة العرض لـ 10
+    
+    # عرض 5 نتائج فقط لضمان عدم تجاوز حد الـ 1024 حكم للصور
+    for i, item in enumerate(results[:5]): 
         title = item.get('title') or item.get('name')
         rating = item.get('vote_average', 0)
         text += f"{i+1}. {title} ({rating})\n"
@@ -251,24 +257,18 @@ async def show_trending_list(update: Update, context: ContextTypes.DEFAULT_TYPE,
     
     keyboard.append([InlineKeyboardButton("🔙 رجوع", callback_data='trending_menu')])
     
-    # التقسيم إذا كان النص طويلاً
-    await send_or_edit(update, context, text[:1020], reply_markup=InlineKeyboardMarkup(keyboard))
+    await send_or_edit(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def show_credits(update: Update, context: ContextTypes.DEFAULT_TYPE, media_type, item_id):
-    query = update.callback_query
-    await query.answer()
-    
     details = get_item_details(media_type, item_id)
     if not details: return
-    
     cast = details.get('credits', {}).get('cast', [])
     if not cast:
-        await query.answer("لا يوجد بيانات للممثلين", show_alert=True)
+        await update.callback_query.answer("لا يوجد بيانات للممثلين", show_alert=True)
         return
 
     text = f"👥 <b>طاقم التمثيل:</b>\n\n"
     keyboard = []
-    # عرض أهم 10 ممثلين
     for actor in cast[:10]:
         name = actor['name']
         char = actor.get('character', 'Unknown')
@@ -279,25 +279,20 @@ async def show_credits(update: Update, context: ContextTypes.DEFAULT_TYPE, media
     await send_or_edit(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def show_person(update: Update, context: ContextTypes.DEFAULT_TYPE, person_id):
-    query = update.callback_query
-    await query.answer()
-    
     data = get_person_details(person_id)
     if not data: return
     
     name = data.get('name')
     biography = data.get('biography', 'لا يوجد سيرة ذاتية.')
     birthday = data.get('birthday', 'N/A')
-    place = data.get('place_of_birth', 'N/A')
     profile_pic = data.get('profile_path')
     
-    text = f"🎭 <b>{name}</b>\n🎂 {birthday}\n📍 {place}\n\n📝 <b>السيرة:</b>\n{biography[:600]}..."
+    text = f"🎭 <b>{name}</b>\n🎂 {birthday}\n\n📝 <b>السيرة:</b>\n{biography[:600]}..."
     
     keyboard = []
-    # إضافة أشهر أعماله
     movies = data.get('movie_credits', {}).get('cast', [])[:5]
     if movies:
-        keyboard.append([InlineKeyboardButton("🎬 مشاهدة أشهر أفلامه", callback_data=f"ignore")]) # Placeholder
+        keyboard.append([InlineKeyboardButton("🎬 مشاهدة أشهر أفلامه", callback_data='ignore')]) 
         for m in movies:
             keyboard.append([InlineKeyboardButton(f"🎥 {m.get('title')}", callback_data=f"info_movie_{m['id']}")])
             
@@ -307,15 +302,11 @@ async def show_person(update: Update, context: ContextTypes.DEFAULT_TYPE, person
     await send_or_edit(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard), photo_url=photo_url)
 
 async def show_similar(update: Update, context: ContextTypes.DEFAULT_TYPE, media_type, item_id):
-    query = update.callback_query
-    await query.answer()
-    
     details = get_item_details(media_type, item_id)
     if not details: return
-    
     similar = details.get('similar', {}).get('results', [])
     if not similar:
-        await query.answer("لا توجد اعمال مشابهة حالياً", show_alert=True)
+        await update.callback_query.answer("لا توجد اعمال مشابهة حالياً", show_alert=True)
         return
 
     text = f"🎲 <b>أعمال قد تعجبك:</b>\n\n"
@@ -323,30 +314,25 @@ async def show_similar(update: Update, context: ContextTypes.DEFAULT_TYPE, media
     for item in similar[:10]:
         title = item.get('title') or item.get('name')
         text += f"• {title}\n"
-        keyboard.append([InlineKeyboardButton(f"👉 {title}", callback_data=f"info_{media_type}_{item['id']}")])
+        # استخدام media_type من النتيجة المشابهة بدلاً من التخمين
+        m_type = item.get('media_type', media_type)
+        keyboard.append([InlineKeyboardButton(f"👉 {title}", callback_data=f"info_{m_type}_{item['id']}")])
         
     keyboard.append([InlineKeyboardButton("🔙 رجوع", callback_data=f"info_{media_type}_{item_id}")])
     await send_or_edit(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard))
 
-# --- عرض العنصر (Item View) ---
-
 async def show_item_info(update: Update, context: ContextTypes.DEFAULT_TYPE, media_type, item_id):
-    query = update.callback_query
-    if query: await query.answer()
-    
     details = get_item_details(media_type, item_id)
     if not details:
          await send_or_edit(update, context, "❌ تعذر جلب التفاصيل.")
          return
 
-    item = details # الديتيلز تحتوي على بيانات الفيلم نفسها
+    item = details 
     caption = format_item_text(item, details, media_type)
     poster_path = item.get('poster_path')
     photo_url = f"{TMDB_IMAGE_BASE_URL}{poster_path}" if poster_path else None
     
     keyboard = []
-    
-    # الصف الأول (أزرار الفيديو والمعلومات)
     row1 = []
     trailer_key = None
     for v in item.get('videos', {}).get('results', []):
@@ -359,13 +345,11 @@ async def show_item_info(update: Update, context: ContextTypes.DEFAULT_TYPE, med
          row1.append(InlineKeyboardButton("📚 الأجزاء", callback_data=f"collection_{cid}"))
     keyboard.append(row1)
 
-    # الصف الثاني (التفاعل)
     row2 = []
     row2.append(InlineKeyboardButton("👥 الممثلين", callback_data=f"credits_{media_type}_{item_id}"))
     row2.append(InlineKeyboardButton("🎲 مشابه", callback_data=f"similar_{media_type}_{item_id}"))
     keyboard.append(row2)
     
-    # الصف الثالث (التحكم)
     row3 = []
     row3.append(InlineKeyboardButton("🔄 آخر", callback_data=f"random_{media_type}"))
     row3.append(InlineKeyboardButton("🏠 الرئيسية", callback_data='back_to_start'))
@@ -383,20 +367,16 @@ async def prompt_search_type(update: Update, context: ContextTypes.DEFAULT_TYPE)
         [InlineKeyboardButton("👤 ممثل (شخصية)", callback_data='set_search_person')],
         [InlineKeyboardButton("🔙 إلغاء", callback_data='back_to_start')]
     ]
-    try: await update.callback_query.edit_message_text("🔍 اختر نوع البحث:", reply_markup=InlineKeyboardMarkup(keyboard))
-    except: pass
+    await send_or_edit(update, context, "🔍 اختر نوع البحث:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, query_str):
-    s_type = context.user_data.get('search_media_type', 'movie')
+    s_type = context.user_data.get('search_media_type', 'multi')
     results = []
     
     if s_type == 'person':
-        data = search_items(query_str, 'person')
-        for p in data:
-            results.append({'type': 'person', 'data': p})
+        results = search_items(query_str, 'person')
     elif s_type == 'anime':
         results = search_items(query_str, 'movie') + search_items(query_str, 'tv')
-        # فلترة الأنمي قد يحتاج مكتبة أفضل، هنا نعتمد على النتيجة العامة
     else:
         results = search_items(query_str, s_type)
 
@@ -409,15 +389,27 @@ async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, que
     await show_search_result(update, context)
 
 async def show_search_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # استخدام get لتجنب الأخطاء إذا ضغط المستخدم على زر بحث قديم
     results = context.user_data.get('search_results', [])
     index = context.user_data.get('current_index', 0)
-    if not results or index >= len(results): index = 0
+    
+    if not results or index >= len(results): 
+        await send_or_edit(update, context, "🚫 انتهت النتائج.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data='back_to_start')]]))
+        return
     
     item = results[index]
     
-    # التحقق هل هو شخص أم فيلم
-    if isinstance(item, dict) and 'type' in item and item['type'] == 'person':
-        p = item['data']
+    # تحديد النوع بشكل صحيح
+    # نتائج البحث (خاصة multi) تحتوي على مفتاح media_type
+    media_type = item.get('media_type')
+    
+    # إذا لم يوجد media_type (مثلاً بحث أنمي)، نستخدم التخمين
+    if not media_type:
+        media_type = 'movie' if 'release_date' in item else 'tv'
+
+    # حالة خاصة: شخصية
+    if media_type == 'person':
+        p = item
         name = p.get('name')
         known = p.get('known_for_department', 'Acting')
         text = f"👤 <b>{name}</b>\n🎭 المجال: {known}"
@@ -430,8 +422,7 @@ async def show_search_result(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await send_or_edit(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard), photo_url=photo_url)
         return
 
-    # معالجة الأفلام والمسلسلات
-    media_type = 'movie' if 'release_date' in item else 'tv'
+    # عرض الفيلم/المسلسل
     item_details = get_item_details(media_type, item['id'])
     caption = format_item_text(item, item_details, media_type)
     poster_path = item.get('poster_path')
@@ -445,7 +436,6 @@ async def show_search_result(update: Update, context: ContextTypes.DEFAULT_TYPE)
     keyboard.append(nav_row)
     
     action_row = []
-    # زر الفتح الكامل
     action_row.append(InlineKeyboardButton("📖 عرض كامل", callback_data=f"info_{media_type}_{item['id']}"))
     keyboard.append(action_row)
     keyboard.append([InlineKeyboardButton("🏠 الرئيسية", callback_data='back_to_start')])
@@ -455,16 +445,13 @@ async def show_search_result(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args: return
     query = " ".join(context.args)
-    context.user_data['search_media_type'] = 'multi' # بحث عام
+    context.user_data['search_media_type'] = 'multi'
     await perform_search(update, context, query)
 
 # --- الأدمن ---
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    if query.from_user.id not in ADMIN_IDS: return
-
+    if update.effective_user.id not in ADMIN_IDS: return
     text = "⚙️ <b>لوحة التحكم</b>"
     keyboard = [
         [InlineKeyboardButton("📊 عدد المشتركين", callback_data='admin_stats')],
@@ -487,7 +474,6 @@ async def admin_ask_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         await update.callback_query.edit_message_text("📢 أرسل النص/الصورة الآن لذيعها للمشتركين.")
     except: pass
-    # تفعيل وضع الانتظار للرسالة القادمة
     context.user_data['waiting_for_broadcast'] = True
 
 async def handle_broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -505,11 +491,11 @@ async def handle_broadcast_message(update: Update, context: ContextTypes.DEFAULT
     for user_id in users:
         try:
             if msg.photo:
-                await context.bot.send_photo(chat_id=user_id, photo=msg.photo[-1].file_id, caption=msg.caption, parse_mode='HTML')
+                await context.bot.send_photo(chat_id=user_id, photo=msg.photo[-1].file_id, caption=msg.caption_html, parse_mode='HTML')
             elif msg.video:
-                await context.bot.send_video(chat_id=user_id, video=msg.video.file_id, caption=msg.caption, parse_mode='HTML')
+                await context.bot.send_video(chat_id=user_id, video=msg.video.file_id, caption=msg.caption_html, parse_mode='HTML')
             elif msg.text:
-                await context.bot.send_message(chat_id=user_id, text=msg.text, parse_mode='HTML')
+                await context.bot.send_message(chat_id=user_id, text=msg.text_html, parse_mode='HTML')
             sent += 1
         except Exception:
             failed += 1
@@ -523,7 +509,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
     
-    # التنقل الرئيسي
     if data == 'back_to_start':
         try: await query.delete_message()
         except: pass
@@ -543,8 +528,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data in ['set_search_movie', 'set_search_tv', 'set_search_anime', 'set_search_person']:
         m_type = data.split('_')[2]
         context.user_data['search_media_type'] = m_type
-        try: await query.edit_message_text(f"🔍 أرسل اسم {'الفيلم' if m_type=='movie' else 'المسلسل' if m_type=='tv' else 'الأنمي' if m_type=='anime' else 'الممثل'} 👇")
-        except: pass
+        txt = f"🔍 أرسل اسم {'الفيلم' if m_type=='movie' else 'المسلسل' if m_type=='tv' else 'الأنمي' if m_type=='anime' else 'الممثل'} 👇"
+        await send_or_edit(update, context, txt)
     elif data == 'search_next': 
         context.user_data['current_index'] += 1; await show_search_result(query, context)
     elif data == 'search_prev': 
@@ -597,7 +582,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parts = col_data.get('parts', [])
             text = f"📚 <b>سلسلة: {name}</b>\n\n"
             keyboard = []
-            for part in parts[:10]: # عرض أول 10 أجزاء
+            for part in parts[:10]:
                 p_date = part.get('release_date', '')[:4] if part.get('release_date') else '----'
                 text += f"{part.get('title')} ({p_date})\n"
                 keyboard.append([InlineKeyboardButton(f"🎥 {part.get('title')}", callback_data=f"info_movie_{part['id']}")])
@@ -615,11 +600,11 @@ if __name__ == '__main__':
         application.add_handler(CommandHandler('search', search_command))
         application.add_handler(CommandHandler('stats', admin_stats))
         
-        # استقبال الرسائل (للأدمن)
-        application.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.TEXT & filters.CAPTION, handle_broadcast_message))
+        # استقبال الرسائل (للأدمن) - تم إصلاح الفلتر
+        application.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.TEXT & ~filters.COMMAND, handle_broadcast_message))
         
         # الأزرار
         application.add_handler(CallbackQueryHandler(button_handler))
         
-        print("Bot is running with advanced features...")
+        print("Bot is running securely...")
         application.run_polling()
