@@ -3,7 +3,7 @@ import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
-# استيراد عام للأخطاء (للحد من المشاكل)
+# استيراد الأخطاء بطريقة عامة لتجنب مشاكل الإصدار
 from pyrogram.errors import all as errors
 
 # ====================================================================
@@ -52,7 +52,7 @@ async def login_process(message: Message):
         except: pass
 
 # ====================================================================
-# المعالجات
+# المعالجات (تم تصحيح الفلاتر هنا)
 # ====================================================================
 
 @bot.on_message(filters.command("start") & filters.user(OWNER_ID))
@@ -60,9 +60,9 @@ async def start(client, message):
     btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔑 تسجيل الدخول", callback_data="login")]])
     await message.reply_text("مرحباً. اضغط الزر لتسجيل حسابك في البوت.", reply_markup=btn)
 
-@bot.on_callback_query(filters.data("login"))
+@bot.on_callback_query(filters.regex(r"^login$")) # التصحيح هنا: استخدام regex بدلاً من data
 async def c_login(client, query):
-    await query.message.edit("📲 أرسل رقم هاتفك الآن (مثال: +966...")
+    await query.message.edit("📲 أرسل رقم هاتفك الآن (مثال: +966...)")
 
 @bot.on_message(filters.text & filters.user(OWNER_ID))
 async def handle(client, message):
@@ -90,7 +90,7 @@ async def handle(client, message):
             
         except Exception as e:
             err_name = type(e).__name__
-            # فحص اسم الخطأ كنص بدلاً من الاستيراد
+            # فحص اسم الخطأ كنص
             if "Password" in err_name:
                 auth_state["step"] = "password"
                 await message.reply_text("🔒 أدخل كلمة المرور (2FA).")
@@ -98,7 +98,8 @@ async def handle(client, message):
                 await message.reply_text("❌ الكود خاطئ.")
             else:
                 await message.reply_text(f"❌ خطأ: {err_name}")
-                await user.disconnect()
+                try: await user.disconnect()
+                except: pass
                 auth_state["step"] = "idle"
         return
 
@@ -116,7 +117,8 @@ async def handle(client, message):
             auth_state["step"] = "idle"
         except:
             await message.reply_text("❌ كلمة المرور خاطئة.")
-            await user.disconnect()
+            try: await user.disconnect()
+            except: pass
             auth_state["step"] = "idle"
 
 # ====================================================================
