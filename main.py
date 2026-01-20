@@ -215,19 +215,33 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await send_or_edit(update, context, welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
+# --- دالة التحقق من الاشتراك (تم تحديثها) ---
+
 async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
-    
+    await query.answer() # إجابة الزر لتخفيف التحميل
+
+    # التحقق مرة أخرى من الاشتراك
     if await is_subscribed(query.from_user.id, context.bot):
+        # إظهار تنبيه للمستخدم بأنه تم التحقق بنجاح
+        await query.answer("✅ تم التحقق! جاري الدخول...", show_alert=False)
+        
+        # محاولة حذف رسالة الاشتراك لتوفير المساحة (اختياري)
         try:
             await query.delete_message()
-        except: pass
-        fake_update = Update(update_id=0, message=query.message)
-        fake_update.message.from_user = query.from_user
+        except Exception:
+            pass # إذا تعذر الحذف، لا توجد مشكلة
+        
+        # نقوم هنا بإنشاء "تحديث وهمي" لتمريره لدالة start
+        # بحيث تعتقد الدالة أن هذا أمر start جديد وتقوم بإرسال القائمة كرسالة جديدة
+        fake_message = query.message
+        fake_update = Update(update_id=0, message=fake_message)
+        
+        # استدعاء start ليعرض القائمة الرئيسية كرسالة جديدة
         await start(fake_update, context)
     else:
-        await query.answer("❌ لم تقم بالاشتراك بعد!", show_alert=True)
+        # إذا لم يشترك
+        await query.answer("❌ لم تقم بالاشتراك بعد! اضغط على الزر بالأعلى.", show_alert=True)
 
 # --- أقسام الترند والمعلومات ---
 
