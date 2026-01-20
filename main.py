@@ -1,15 +1,10 @@
 import os
 import asyncio
-import logging
-from pyrogram import Client, filters, enums
+from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.errors import SessionPasswordNeededError, PhoneCodeInvalidError
-from pyrogram.errors import (
-    SessionPasswordNeededError, 
-    PhoneCodeInvalidError, 
-    PhoneCodeExpiredError,
-    PasswordHashInvalidError
-)
+
+# استيراد عام للأخطاء (للحد من المشاكل)
+from pyrogram.errors import all as errors
 
 # ====================================================================
 # إعدادات النظام
@@ -20,155 +15,120 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "6741306329:AAF9gyhoD_li410vEdu62s7WlhZV
 TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID", -1002064206339))
 OWNER_ID = int(os.environ.get("OWNER_ID", 778375826))
 
-# ====================================================================
-# حالة التسجيل (لا تعدل عليها)
-# ====================================================================
-auth_data = {
-    "client": None,      # سيتم تخزين عميل اليوزر بوت هنا مؤقتاً
+# حالة التسجيل
+auth_state = {
+    "client": None,
     "phone_code_hash": None,
-    "step": "idle"       # idle, waiting_code, waiting_2fa
+    "step": "idle" 
 }
 
-# ====================================================================
-# تهيئة البوت المتحكم (يعمل دائماً)
-# ====================================================================
+# البوت
 bot = Client("bot_ctrl", bot_token=BOT_TOKEN, api_id=API_ID, api_hash=API_HASH)
 
 # ====================================================================
-# دالة بدء التسجيل
+# دالة التسجيل
 # ====================================================================
-async def start_auth_process(message: Message):
-    # إذا كان هناك عميل يعمل بالفعل، أغلقه أولاً
-    if auth_data["client"]:
-        try:
-            await auth_data["client"].stop()
+async def login_process(message: Message):
+    if auth_state["client"]:
+        try: await auth_state["client"].stop()
         except: pass
 
-    # إنشاء عميل يوزر بوت مؤقت بدون جلسة لطلب الكود
-    user = Client(name="temp_auth_user", api_id=API_ID, api_hash=API_HASH, in_memory=True)
-    auth_data["client"] = user
+    user = Client("temp_login", api_id=API_ID, api_hash=API_HASH, in_memory=True)
+    auth_state["client"] = user
     
     try:
         await user.connect()
-        phone_number = message.text
+        await message.reply_text("📱 جاري الاتصال بتيليجرام...")
         
-        await message.reply_text("📱 جاري طلب الكود من تيليجرام...")
+        sent_code = await user.send_code(message.text)
+        auth_state["phone_code_hash"] = sent_code.phone_code_hash
+        auth_state["step"] = "code"
         
-        # إرسال رقم الهاتف
-        sent_code = await user.send_code(phone_number)
-        
-        auth_data["phone_code_hash"] = sent_code.phone_code_hash
-        auth_data["step"] = "waiting_code"
-        
-        await message.reply_text(
-            "✅ تم إرسال كود التفعيل إلى تليجرام.\n\n"
-            "👉 **أرسل الكود الآن (الأرقام فقط) عبر البوت هنا.**"
-        )
+        await message.reply_text("✅ تم إرسال الكود.\n👉 أرسل الكود (أرقام فقط).")
         
     except Exception as e:
-        await message.reply_text(f"❌ حدث خطأ أثناء إرسال الرقم: `{e}`")
-        await user.disconnect()
+        await message.reply_text(f"❌ خطأ: `{str(e)}`")
+        try: await user.disconnect()
+        except: pass
 
 # ====================================================================
-# معالجات البوت (أوامر التسجيل)
+# المعالجات
 # ====================================================================
 
 @bot.on_message(filters.command("start") & filters.user(OWNER_ID))
-async def start_cmd(client, message):
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔑 تسجيل دخول اليوزر بوت", callback_data="login_userbot")]
-    ])
-    await message.reply_text("🤖 البوت جاهز.\nاضغط على الزر أدناه لتسجيل الدخول بحسابك الشخصي.", reply_markup=keyboard)
+async def start(client, message):
+    btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔑 تسجيل الدخول", callback_data="login")]])
+    await message.reply_text("مرحباً. اضغط الزر لتسجيل حسابك في البوت.", reply_markup=btn)
 
-@bot.on_callback_query(filters.data("login_userbot"))
-async def login_callback(client, callback_query):
-    await callback_query.message.edit("📲 أرسل رقم هاتفك الآن (مع مفتاح الدولة، مثلاً: +9665000000)")
+@bot.on_callback_query(filters.data("login"))
+async def c_login(client, query):
+    await query.message.edit("📲 أرسل رقم هاتفك الآن (مثال: +966...")
 
 @bot.on_message(filters.text & filters.user(OWNER_ID))
-async def handle_text(client, message):
-    txt = message.text
+async def handle(client, message):
+    text = message.text
     
-    # 1. إذا كان المستخدم يرسل رقم الهاتف
-    if txt.startswith("+") and txt[1:].isdigit() and auth_data["step"] == "idle":
-        await start_auth_process(message)
+    # حالة رقم الهاتف
+    if text.startswith("+") and auth_state["step"] == "idle":
+        await login_process(message)
         return
 
-    # 2. إذا كان المستخدم يرسل كود التفعيل
-    if auth_data["step"] == "waiting_code":
-        user = auth_data["client"]
+    # حالة الكود
+    if auth_state["step"] == "code":
+        user = auth_state["client"]
         try:
-            # محاولة تسجيل الدخول
-            await user.sign_in(
-                message.chat.id, 
-                auth_data["phone_code_hash"], 
-                txt
-            )
+            await user.sign_in(message.chat.id, auth_state["phone_code_hash"], text)
             
-            # نجاح الدخول!
-            auth_data["step"] = "idle"
-            string_session = user.export_session_string()
-            
+            # نجاح
+            string = user.export_session_string()
             await message.reply_text(
-                f"✅ **تم تسجيل الدخول بنجاح!**\n\n"
-                f"🔑 هذا هو كود الجلسة الخاص بك (String Session):\n\n"
-                f"`{string_session}`\n\n"
-                f"⚠️ انسخه واحفظه في Railway في متغير `STRING_SESSION` ثم أعد تشغيل البوت.",
+                f"✅ تم تسجيل الدخول!\n\nكود الجلسة:\n`{string}`",
                 parse_mode="Markdown"
             )
-            
             await user.disconnect()
-            
-        except SessionPasswordNeededError:
-            auth_data["step"] = "waiting_2fa"
-            await message.reply_text("🔒 الحساب محمي بكلمة مرور (2FA).\n\n👉 **أرسل كلمة المرور الآن.**")
-            
-        except PhoneCodeInvalidError:
-            await message.reply_text("❌ الكود خاطئ! حاول مرة أخرى.")
-            await user.disconnect()
-            auth_data["step"] = "idle"
+            auth_state["step"] = "idle"
             
         except Exception as e:
-            await message.reply_text(f"❌ خطأ: `{e}`")
-            await user.disconnect()
-            auth_data["step"] = "idle"
+            err_name = type(e).__name__
+            # فحص اسم الخطأ كنص بدلاً من الاستيراد
+            if "Password" in err_name:
+                auth_state["step"] = "password"
+                await message.reply_text("🔒 أدخل كلمة المرور (2FA).")
+            elif "Code" in err_name:
+                await message.reply_text("❌ الكود خاطئ.")
+            else:
+                await message.reply_text(f"❌ خطأ: {err_name}")
+                await user.disconnect()
+                auth_state["step"] = "idle"
         return
 
-    # 3. إذا كان المستخدم يرسل كلمة المرور (2FA)
-    if auth_data["step"] == "waiting_2fa":
-        user = auth_data["client"]
+    # حالة كلمة المرور
+    if auth_state["step"] == "password":
+        user = auth_state["client"]
         try:
-            await user.check_password(txt)
-            
-            # نجاح الدخول بكلمة المرور
-            auth_data["step"] = "idle"
-            string_session = user.export_session_string()
-            
+            await user.check_password(text)
+            string = user.export_session_string()
             await message.reply_text(
-                f"✅ **تم التحقق بنجاح!**\n\n"
-                f"🔑 كود الجلسة:\n\n`{string_session}`\n\n"
-                f"⚠️ انسخه وضعه في Railway (STRING_SESSION).",
+                f"✅ تم التحقق!\n\nكود الجلسة:\n`{string}`",
                 parse_mode="Markdown"
             )
-            
             await user.disconnect()
-            
-        except Exception as e:
-            await message.reply_text(f"❌ كلمة المرور خاطئة أو حدث خطأ: `{e}`")
+            auth_state["step"] = "idle"
+        except:
+            await message.reply_text("❌ كلمة المرور خاطئة.")
             await user.disconnect()
-            auth_data["step"] = "idle"
+            auth_state["step"] = "idle"
 
 # ====================================================================
 # التشغيل
 # ====================================================================
 async def main():
-    print("Bot is running...")
+    print("Starting...")
     await bot.start()
-    print("Bot started!")
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    # التأكد من وجود المتغيرات الأساسية
-    if not BOT_TOKEN or not API_ID or not API_HASH:
-        print("Error: Please set BOT_TOKEN, API_ID, API_HASH in environment variables.")
+    if not API_ID or not API_HASH:
+        print("Missing API_ID or API_HASH")
     else:
         asyncio.run(main())
