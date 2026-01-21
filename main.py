@@ -18,7 +18,7 @@ AZKAR_API_URL = "https://raw.githubusercontent.com/nawafalqari/azkar-api/master/
 # --- دوال مساعدة ---
 
 async def send_action(action: ChatAction):
-    """ديكوراتور لإرسال حالة التحميل (جاري الكتابة/الرفع) قبل تنفيذ الأمر"""
+    """ديكوراتور لإظهار حالة التحميل"""
     def decorator(func):
         async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if update.message:
@@ -33,26 +33,32 @@ async def send_action(action: ChatAction):
 
 @send_action(ChatAction.TYPING)
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # تصميم القائمة بنظام الشبكة (Grid Layout)
     keyboard = [
-        [InlineKeyboardButton("📖 قراءة القرآن", callback_data='quran_list')],
-        [InlineKeyboardButton("📚 تفسير القرآن (الميسر)", callback_data='tafsir_list')],
-        [InlineKeyboardButton("🎧 استماع (مشاري العفاسي)", callback_data='audio_list')],
-        [InlineKeyboardButton("🎲 آية عشوائية", callback_data='random_ayah')],
-        [InlineKeyboardButton("🔍 بحث عن آية", callback_data='search_prompt')],
-        [InlineKeyboardButton("📿 الأذكار", callback_data='azkar_categories')]
+        [
+            InlineKeyboardButton("📖 القرآن الكريم", callback_data='quran_list'),
+            InlineKeyboardButton("📚 التفسير الميسر", callback_data='tafsir_list')
+        ],
+        [
+            InlineKeyboardButton("🎧 الصوتيات", callback_data='audio_list'),
+            InlineKeyboardButton("📿 الأذكار اليومية", callback_data='azkar_categories')
+        ],
+        [
+            InlineKeyboardButton("🔍 بحث في الآيات", callback_data='search_prompt'),
+            InlineKeyboardButton("🎲 آية عشوائية", callback_data='random_ayah')
+        ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     welcome_text = (
-        "<b>مرحباً بك في بوت القرآن الكريم المتكامل ✨</b>\n\n"
-        "يمكنك من خلال هذا البوت:\n"
-        "- 📖 قراءة السور بوضوح\n"
-        "- 📚 فهم المعنى عبر التفسير الميسر\n"
-        "- 🎧 الاستماع للتلاوات\n"
-        "- 🎲 قراءة آية عشوائية للتدبر\n"
-        "- 🔍 البحث عن كلمات في القرآن\n"
-        "- 📿 الأذكار اليومية\n\n"
-        "<i>اختر من القائمة أدناه ما تريد:</i>"
+        "﷽\n"
+        "<b>أهلاً بك في المصحف الشامل ✨</b>\n\n"
+        "بوت متكامل يوفر لك:\n"
+        "▫️ تلاوة وقراءة القرآن الكريم\n"
+        "▫️ التفسير الميسر للآيات\n"
+        "▫️ استماع لأجمل التلاوات\n"
+        "▫️ الأذكار اليومية والمباحث\n\n"
+        "<i>تفضل باختيار ما تريد من القائمة أدناه 👇</i>"
     )
     
     if update.message:
@@ -63,91 +69,88 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- قسم القراءة والتفسير ---
 
 async def show_quran_list(update: Update, context: ContextTypes.DEFAULT_TYPE, page=0, mode='read'):
-    """عرض قائمة السور (للقراءة أو التفسير)"""
+    """عرض قائمة السور مع نوعها (مكي/مدني)"""
     query = update.callback_query
     await query.answer()
     
     try:
         response = requests.get(f"{QURAN_API_BASE}/surah")
         if response.status_code != 200:
-            raise Exception("فشل الاتصال بـ API القرآن")
+            raise Exception("فشل الاتصال بخدمة القرآن")
             
         surahs = response.json()['data']
-        per_page = 10
+        per_page = 15 # زيادة عدد السور في الصفحة
         start_idx = page * per_page
         end_idx = start_idx + per_page
         current_surahs = surahs[start_idx:end_idx]
         
         keyboard = []
         for surah in current_surahs:
-            # تحديد بادمة الطلب بناءً على الوضع (قراءة أو تفسير)
+            # تحديد نوع السورة
+            rev_type = "مكية" if surah['revelationType'] == 'Meccan' else "مدنية"
             prefix = "surah_" if mode == 'read' else "tafsir_"
-            keyboard.append([InlineKeyboardButton(f"{surah['number']}. {surah['name']} ({surah['englishName']})", callback_data=f"{prefix}{surah['number']}")])
+            # تنسيق اسم السورة مع نوعها
+            btn_text = f"{surah['number']}. {surah['name']} [{rev_type}]"
+            keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"{prefix}{surah['number']}")])
         
         # أزرار التنقل
         nav_buttons = []
-        # نحتاج لتمرير الوضع الحالي (mode) في أزرار التنقل
         page_prefix = "qpage_" if mode == 'read' else "tpage_"
         
         if page > 0:
-            nav_buttons.append(InlineKeyboardButton("⬅️ السابق", callback_data=f"{page_prefix}{page-1}"))
+            nav_buttons.append(InlineKeyboardButton("◀️ السابق", callback_data=f"{page_prefix}{page-1}"))
         if end_idx < len(surahs):
-            nav_buttons.append(InlineKeyboardButton("التالي ➡️", callback_data=f"{page_prefix}{page+1}"))
+            nav_buttons.append(InlineKeyboardButton("التالي ▶️", callback_data=f"{page_prefix}{page+1}"))
         
         if nav_buttons:
             keyboard.append(nav_buttons)
         
-        keyboard.append([InlineKeyboardButton("🏠 العودة للقائمة الرئيسية", callback_data='main_menu')])
+        keyboard.append([InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data='main_menu')])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
-        title = "اختر السورة للقراءة:" if mode == 'read' else "اختر السورة للتفسير:"
+        title = "📖 اختر السورة للقراءة:" if mode == 'read' else "📚 اختر السورة للتفسير:"
         await query.edit_message_text(title, reply_markup=reply_markup)
     except Exception as e:
         logging.error(e)
-        await query.edit_message_text("❌ حدث خطأ أثناء جلب قائمة السور. حاول مرة أخرى لاحقاً.")
+        await query.edit_message_text("❌ عذراً، حدث خطأ أثناء تحميل القائمة. يرجى المحاولة لاحقاً.")
 
 async def show_surah_content(update: Update, context: ContextTypes.DEFAULT_TYPE, surah_number, mode='read'):
-    """عرض محتوى السورة (نص أو تفسير)"""
+    """عرض محتوى السورة بشكل مرتب"""
     query = update.callback_query
-    await query.answer("جاري جلب السورة...")
+    await query.answer()
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
     
     try:
-        # تحديد النسخة: النص العادي (ar.alafasy يحتوي على النص) أو التفسير (ar.muyassar)
         edition = "ar.alafasy" if mode == 'read' else "ar.muyassar"
         response = requests.get(f"{QURAN_API_BASE}/surah/{surah_number}/{edition}")
         
         if response.status_code != 200:
-            raise Exception("فشل جلب بيانات السورة")
+            raise Exception("فشل جلب البيانات")
             
         data = response.json()['data']
-        title_type = "سورة" if mode == 'read' else "تفسير سورة"
+        header = f"▫️ {data['englishName']} ({data['englishNameTranslation']})\n"
+        header += f"▫️ نوعها: {'مكية' if data['revelationType'] == 'Meccan' else 'مدنية'}\n"
+        header += f"▫️ عدد الآيات: {data['numberOfAyahs']}\n"
         
-        text = f"<b>{title_type} {data['name']}</b>\n\n"
+        title_text = f"<b>سورة {data['name']}</b>\n\n{header}\n"
         
-        # إرسال على دفعات لتجنب حد الرسائل
-        message_buffer = text
+        message_buffer = title_text
         for ayah in data['ayahs']:
-            ayah_text = ayah['text']
-            if mode == 'tafsir':
-                # تنظيف النص قليلاً في حالة التفسير إذا احتوى على رموز غير ضرورية
-                pass 
+            # إضافة فواصل مميزة بين الآيات
+            ayah_text = f"۞ {ayah['text']}\n" if mode == 'read' else f"({ayah['numberInSurah']}) {ayah['text']}\n"
             
-            # إضافة الآية للنص
-            chunk = f"({ayah['numberInSurah']}) {ayah_text}\n\n"
-            
-            if len(message_buffer) + len(chunk) > 3500:
+            if len(message_buffer) + len(ayah_text) > 3800:
                 await query.message.reply_text(message_buffer, parse_mode=ParseMode.HTML)
                 message_buffer = ""
-            message_buffer += chunk
+            message_buffer += ayah_text
         
         if message_buffer:
-            keyboard = [[InlineKeyboardButton("🏠 العودة للقائمة", callback_data='quran_list' if mode == 'read' else 'tafsir_list')]]
+            keyboard = [[InlineKeyboardButton("🔙 العودة للسور", callback_data='quran_list' if mode == 'read' else 'tafsir_list')]]
             await query.message.reply_text(message_buffer, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
             
     except Exception as e:
         logging.error(e)
-        await query.message.reply_text("❌ حدث خطأ أثناء تحميل السورة.")
+        await query.message.reply_text("❌ عذراً، تعذر تحميل السورة في الوقت الحالي.")
 
 # --- قسم الصوت ---
 
@@ -161,42 +164,40 @@ async def show_audio_list(update: Update, context: ContextTypes.DEFAULT_TYPE, pa
         if response.status_code != 200: raise Exception("API Error")
         
         surahs = response.json()['data']
-        per_page = 10
+        per_page = 15
         start_idx = page * per_page
         end_idx = start_idx + per_page
         current_surahs = surahs[start_idx:end_idx]
         
         keyboard = []
         for surah in current_surahs:
-            keyboard.append([InlineKeyboardButton(f"🎧 {surah['name']}", callback_data=f"audio_{surah['number']}")])
+            keyboard.append([InlineKeyboardButton(f"🎧 سورة {surah['name']}", callback_data=f"audio_{surah['number']}")])
         
         nav_buttons = []
         if page > 0:
-            nav_buttons.append(InlineKeyboardButton("⬅️ السابق", callback_data=f"apage_{page-1}"))
+            nav_buttons.append(InlineKeyboardButton("◀️ السابق", callback_data=f"apage_{page-1}"))
         if end_idx < len(surahs):
-            nav_buttons.append(InlineKeyboardButton("التالي ➡️", callback_data=f"apage_{page+1}"))
+            nav_buttons.append(InlineKeyboardButton("التالي ▶️", callback_data=f"apage_{page+1}"))
         
         if nav_buttons:
             keyboard.append(nav_buttons)
         
-        keyboard.append([InlineKeyboardButton("🏠 العودة للقائمة الرئيسية", callback_data='main_menu')])
+        keyboard.append([InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data='main_menu')])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text("اختر السورة للاستماع إليها بصوت الشيخ مشاري العفاسي:", reply_markup=reply_markup)
+        await query.edit_message_text("🎧 اختر السورة للاستماع بصوت الشيخ مشاري العفاسي:", reply_markup=reply_markup)
     except Exception as e:
-        await query.edit_message_text("حدث خطأ في تحميل قائمة الصوتيات.")
+        await query.edit_message_text("❌ خطأ في تحميل القائمة الصوتية.")
 
 @send_action(ChatAction.UPLOAD_AUDIO)
 async def send_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, surah_number):
     query = update.callback_query
-    await query.answer("جاري تجهيز التلاوة...")
+    await query.answer("جاري إرسال التلاوة...")
     
     try:
-        # رابط مباشر للسورة كاملة
         audio_url = f"https://cdn.islamic.network/quran/audio-surah/128/ar.alafasy/{surah_number}.mp3"
-        
-        # محاولة جلب اسم السورة للعنوان
         surah_name = f"سورة رقم {surah_number}"
+        
         try:
             res = requests.get(f"{QURAN_API_BASE}/surah/{surah_number}").json()['data']
             surah_name = res['name']
@@ -206,11 +207,11 @@ async def send_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, surah_n
         await query.message.reply_audio(
             audio=audio_url, 
             title=f"سورة {surah_name}", 
-            caption="تلاوة بصوت الشيخ مشاري العفاسي 🎧",
+            caption="🎧 تلاوة خاشعة بصوت الشيخ مشاري العفاسي\nجزاه الله خيراً",
             parse_mode=ParseMode.HTML
         )
     except Exception as e:
-        await query.message.reply_text("عذراً، تعذر تحميل الملف الصوتي حالياً.")
+        await query.message.reply_text("❌ عذراً، لم نتمكن من تحميل الملف الصوتي.")
 
 # --- آية عشوائية ---
 
@@ -225,23 +226,26 @@ async def random_ayah(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         data = response.json()['data']
         text = (
-            f"🎲 <b>آية عشوائية للتدبر</b>\n\n"
-            f"「{data['text']}」\n\n"
-            f"📖 سورة {data['surah']['name']} - آية {data['numberInSurah']}"
+            "🌟 <b>آية للتدبر</b> 🌟\n\n"
+            f"<i>{data['text']}</i>\n\n"
+            f"📖 <b>سورة {data['surah']['name']}</b> - الآية {data['numberInSurah']}"
         )
         
-        keyboard = [[InlineKeyboardButton("🔄 آية أخرى", callback_data='random_ayah')], [InlineKeyboardButton("🏠 الرئيسية", callback_data='main_menu')]]
+        keyboard = [
+            [InlineKeyboardButton("🔄 آية أخرى", callback_data='random_ayah')],
+            [InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data='main_menu')]
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
+        # التحقق من نوع الرسالة لتجنب الأخطاء
         if query.message.text:
             await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
         else:
-            # إذا كان الرد على رسالة أخرى (نادر في هذا السياق)
             await query.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
             
     except Exception as e:
         logging.error(e)
-        await query.edit_message_text("حدث خطأ في جلب الآية.")
+        await query.edit_message_text("❌ حدث خطأ في جلب الآية.")
 
 # --- قسم الأذكار ---
 
@@ -250,12 +254,16 @@ async def show_azkar_categories(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     
     keyboard = [
-        [InlineKeyboardButton("☀️ أذكار الصباح", callback_data='zkr_أذكار الصباح')],
-        [InlineKeyboardButton("🌙 أذكار المساء", callback_data='zkr_أذكار المساء')],
-        [InlineKeyboardButton("💤 أذكار النوم", callback_data='zkr_أذكار النوم')],
-        [InlineKeyboardButton("🏠 العودة للقائمة الرئيسية", callback_data='main_menu')]
+        [
+            InlineKeyboardButton("☀️ أذكار الصباح", callback_data='zkr_أذكار الصباح'),
+            InlineKeyboardButton("🌙 أذكار المساء", callback_data='zkr_أذكار المساء')
+        ],
+        [
+            InlineKeyboardButton("💤 أذكار النوم", callback_data='zkr_أذكار النوم'),
+            InlineKeyboardButton("🔙 العودة", callback_data='main_menu')
+        ]
     ]
-    await query.edit_message_text("اختر فئة الأذكار:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await query.edit_message_text("📿 اختر فئة الأذكار:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 @send_action(ChatAction.TYPING)
 async def show_azkar_content(update: Update, context: ContextTypes.DEFAULT_TYPE, category):
@@ -267,24 +275,21 @@ async def show_azkar_content(update: Update, context: ContextTypes.DEFAULT_TYPE,
         if response.status_code != 200: raise Exception("API Azkar Error")
         
         azkar_data = response.json()
-        # المفتاح في ملف JSON قد يحتوي على مسافات، نبحث عنه
         category_azkar = azkar_data.get(category, [])
         
         if not category_azkar:
-            await query.edit_message_text("عذراً، لم يتم العثور على أذكار لهذه الفئة.")
+            await query.edit_message_text("❌ لم يتم العثور على أذكار لهذه الفئة.")
             return
 
         text = f"📿 <b>{category}</b>\n\n"
-        # إرسال الأذكار في رسائل متعددة إذا كانت طويلة
         message_buffer = text
-        count = 0
         
-        for item in category_azkar:
-            count += 1
+        for idx, item in enumerate(category_azkar, 1):
             zkr_text = (
-                f"<b>🔹 الذكر رقم {count}:</b>\n"
+                f"━━━━━━━━━━━━━━━\n"
+                f"<b>❝ الذكر رقم {idx} ❞</b>\n"
                 f"{item['zekr']}\n"
-                f"<i>التكرار: {item['count']}</i>\n\n"
+                f"🔄 <b>التكرار:</b> {item['count']}\n"
             )
             
             if len(message_buffer) + len(zkr_text) > 3500:
@@ -292,21 +297,22 @@ async def show_azkar_content(update: Update, context: ContextTypes.DEFAULT_TYPE,
                 message_buffer = ""
             message_buffer += zkr_text
         
-        keyboard = [[InlineKeyboardButton("🏠 العودة للأذكار", callback_data='azkar_categories')]]
+        keyboard = [[InlineKeyboardButton("🔙 العودة للأذكار", callback_data='azkar_categories')]]
         
         if message_buffer:
             await query.message.reply_text(message_buffer, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
             
     except Exception as e:
         logging.error(e)
-        await query.message.reply_text("حدث خطأ أثناء تحميل الأذكار.")
+        await query.message.reply_text("❌ حدث خطأ في تحميل الأذكار.")
 
 # --- قسم البحث ---
 
 async def search_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("📝 من فضلك أرسل الكلمة التي تود البحث عنها في القرآن الكريم:")
+    keyboard = [[InlineKeyboardButton("🔙 إلغاء والعودة", callback_data='main_menu')]]
+    await query.edit_message_text("📝 <b>أرسل الكلمة أو النص الذي تريد البحث عنه:</b>", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
     context.user_data['state'] = 'searching'
 
 @send_action(ChatAction.TYPING)
@@ -314,28 +320,25 @@ async def handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('state') == 'searching':
         keyword = update.message.text
         try:
-            response = requests.get(f"{QURAN_API_BASE}/search/{keyword}/all/ar.alafasy") # البحث في النص العربي
+            response = requests.get(f"{QURAN_API_BASE}/search/{keyword}/all/ar.alafasy")
             
             if response.status_code != 200: raise Exception("Search Error")
             
             data = response.json()
-            if not data.get('data'):
-                # بعض الاستجابات قد تأتي مختلفة
-                results = []
-            else:
+            results = []
+            if data.get('data'):
                 results = data['data'].get('matches', [])
 
             if not results:
-                await update.message.reply_text(f"❌ لم يتم العثور على نتائج للكلمة '<b>{keyword}</b>'.", parse_mode=ParseMode.HTML)
+                await update.message.reply_text(f"❌ <b>عذراً</b>، لم يتم العثور على نتائج للبحث عن '<i>{keyword}</i>'.", parse_mode=ParseMode.HTML)
             else:
-                text = f"🔍 <b>نتائج البحث عن '{keyword}':</b>\n\n"
+                await update.message.reply_text(f"✅ <b>تم العثور على {len(results)} نتيجة</b> لـ '<i>{keyword}</i>':\n", parse_mode=ParseMode.HTML)
                 
-                # عرض أول 10 نتائج فقط لتجنب التلصيق
-                message_buffer = text
+                message_buffer = ""
                 for res in results[:10]: 
                     res_text = (
                         f"📖 {res['text']}\n"
-                        f"<i>(سورة {res['surah']['name']} - آية {res['numberInSurah']})</i>\n\n"
+                        f"<i>[سورة {res['surah']['name']} - آية {res['numberInSurah']}]</i>\n\n"
                     )
                     
                     if len(message_buffer) + len(res_text) > 3500:
@@ -346,13 +349,12 @@ async def handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if message_buffer:
                     await update.message.reply_text(message_buffer, parse_mode=ParseMode.HTML)
             
-            # إعادة زر القائمة الرئيسية بعد البحث
-            keyboard = [[InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data='main_menu')]]
-            await update.message.reply_text("انتهى البحث.", reply_markup=InlineKeyboardMarkup(keyboard))
+            keyboard = [[InlineKeyboardButton("🔙 القائمة الرئيسية", callback_data='main_menu')]]
+            await update.message.reply_text("انتهى البحث 👇", reply_markup=InlineKeyboardMarkup(keyboard))
             
         except Exception as e:
             logging.error(e)
-            await update.message.reply_text("حدث خطأ أثناء عملية البحث.")
+            await update.message.reply_text("❌ حدث خطأ أثناء عملية البحث.")
         
         context.user_data['state'] = None
 
@@ -396,7 +398,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == 'azkar_categories':
         await show_azkar_categories(update, context)
     elif data.startswith('zkr_'):
-        # فك تشفير اسم الفئة (تحويل %20 إلى مسافات إذا لزم الأمر، لكن هنا نستخدم النص مباشرة)
         category = data.replace('zkr_', '')
         await show_azkar_content(update, context, category)
         
@@ -412,5 +413,5 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_search))
     
-    print("البوت يعمل الآن مع التحسينات الجديدة...")
+    print("✅ البوت يعمل الآن مع الواجهة المحسنة والمنظمة...")
     app.run_polling()
