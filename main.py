@@ -17,7 +17,6 @@ AZKAR_API_URL = "https://raw.githubusercontent.com/nawafalqari/azkar-api/master/
 
 # --- دوال مساعدة ---
 
-# تم إصلاح الـ Decorator ليكون دالة عادية وليست async
 def send_action(action: ChatAction):
     """ديكوراتور لإظهار حالة التحميل"""
     def decorator(func):
@@ -155,7 +154,8 @@ async def show_surah_content(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
 # --- قسم الصوت ---
 
-@send_action(ChatAction.UPLOAD_AUDIO)
+# تم تعديل هذا السطر لاستخدام RECORD_AUDIO بدلاً من UPLOAD_AUDIO لمنع الخطأ
+@send_action(ChatAction.RECORD_AUDIO) 
 async def show_audio_list(update: Update, context: ContextTypes.DEFAULT_TYPE, page=0):
     query = update.callback_query
     await query.answer()
@@ -190,7 +190,8 @@ async def show_audio_list(update: Update, context: ContextTypes.DEFAULT_TYPE, pa
     except Exception as e:
         await query.edit_message_text("❌ خطأ في تحميل القائمة الصوتية.")
 
-@send_action(ChatAction.UPLOAD_AUDIO)
+# تم تعديل هذا السطر أيضاً
+@send_action(ChatAction.RECORD_AUDIO)
 async def send_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, surah_number):
     query = update.callback_query
     await query.answer("جاري إرسال التلاوة...")
