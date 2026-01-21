@@ -1,7 +1,2 @@
-python-telegram-bot>=20.8
-yt-dlp
-python-dotenv
+python-telegram-bot>=20.0
 requests
-pysocks
-pyrogram>=2.0.106
-tgcrypto>=1.2.5
