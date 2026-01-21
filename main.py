@@ -11,7 +11,7 @@ logging.basicConfig(
 )
 
 # --- الإعدادات ---
-TOKEN = "6741306329:AAF9gyhoD_li410vEdu62s7WlhZVVpKJu58"
+TOKEN = "6741306329:AAFYULFymDdqDblIhHUhMf2uiPSLl_i70Os"
 QURAN_API_BASE = "https://api.alquran.cloud/v1"
 AZKAR_API_URL = "https://raw.githubusercontent.com/nawafalqari/azkar-api/master/azkar.json"
 
