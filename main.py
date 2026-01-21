@@ -1,5 +1,6 @@
 import logging
 import requests
+import asyncio  # استيراد asyncio للتنفيذ غير المتزامن
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from telegram.constants import ParseMode, ChatAction
@@ -11,20 +12,30 @@ logging.basicConfig(
 )
 
 # --- الإعدادات ---
+# تنبيه: ضع توكن البوت الخاص بك هنا
 TOKEN = "6741306329:AAFYULFymDdqDblIhHUhMf2uiPSLl_i70Os"
 QURAN_API_BASE = "https://api.alquran.cloud/v1"
 AZKAR_API_URL = "https://raw.githubusercontent.com/nawafalqari/azkar-api/master/azkar.json"
 
 # --- دوال مساعدة ---
 
+async def http_get(url: str):
+    """
+    دالة لجلب البيانات بشكل غير متزامن (Non-blocking).
+    نستخدمها بدلاً من requests.get المباشر لمنع البوت من التجمد أثناء الانتظار.
+    """
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, requests.get, url)
+
 def send_action(action: ChatAction):
-    """ديكوراتور لإظهار حالة التحميل"""
+    """ديكوراتور لإظهار حالة التحميل (كتابة، رفع ملف، إلخ)"""
     def decorator(func):
         async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            chat_id = update.effective_chat.id
             if update.message:
-                await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=action)
+                await context.bot.send_chat_action(chat_id=chat_id, action=action)
             elif update.callback_query:
-                await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=action)
+                await context.bot.send_chat_action(chat_id=chat_id, action=action)
             return await func(update, context)
         return wrapper
     return decorator
@@ -63,8 +74,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if update.message:
         await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-    else:
-        await update.callback_query.edit_message_text(welcome_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+    elif update.callback_query:
+        try:
+            # محاولة تعديل الرسالة الحالية
+            await update.callback_query.edit_message_text(welcome_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+        except Exception:
+            # إذا فشل التعديل (مثلاً الرسالة قديمة)، نرسل رسالة جديدة
+            await update.callback_query.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
 # --- قسم القراءة والتفسير ---
 
@@ -74,22 +90,21 @@ async def show_quran_list(update: Update, context: ContextTypes.DEFAULT_TYPE, pa
     await query.answer()
     
     try:
-        response = requests.get(f"{QURAN_API_BASE}/surah")
+        # استخدام الدالة غير المتزامنة http_get
+        response = await http_get(f"{QURAN_API_BASE}/surah")
         if response.status_code != 200:
             raise Exception("فشل الاتصال بخدمة القرآن")
             
         surahs = response.json()['data']
-        per_page = 15 # زيادة عدد السور في الصفحة
+        per_page = 15
         start_idx = page * per_page
         end_idx = start_idx + per_page
         current_surahs = surahs[start_idx:end_idx]
         
         keyboard = []
         for surah in current_surahs:
-            # تحديد نوع السورة
             rev_type = "مكية" if surah['revelationType'] == 'Meccan' else "مدنية"
             prefix = "surah_" if mode == 'read' else "tafsir_"
-            # تنسيق اسم السورة مع نوعها
             btn_text = f"{surah['number']}. {surah['name']} [{rev_type}]"
             keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"{prefix}{surah['number']}")])
         
@@ -118,11 +133,12 @@ async def show_surah_content(update: Update, context: ContextTypes.DEFAULT_TYPE,
     """عرض محتوى السورة بشكل مرتب"""
     query = update.callback_query
     await query.answer()
+    # إرسال حالة الكتابة لفترة طويلة لأن السورة قد تأخذ وقتاً
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
     
     try:
         edition = "ar.alafasy" if mode == 'read' else "ar.muyassar"
-        response = requests.get(f"{QURAN_API_BASE}/surah/{surah_number}/{edition}")
+        response = await http_get(f"{QURAN_API_BASE}/surah/{surah_number}/{edition}")
         
         if response.status_code != 200:
             raise Exception("فشل جلب البيانات")
@@ -136,14 +152,16 @@ async def show_surah_content(update: Update, context: ContextTypes.DEFAULT_TYPE,
         
         message_buffer = title_text
         for ayah in data['ayahs']:
-            # إضافة فواصل مميزة بين الآيات
+            # تحسين تنسيق الآيات
             ayah_text = f"۞ {ayah['text']}\n" if mode == 'read' else f"({ayah['numberInSurah']}) {ayah['text']}\n"
             
+            # تقسيم الرسالة إذا كانت طويلة جداً
             if len(message_buffer) + len(ayah_text) > 3800:
                 await query.message.reply_text(message_buffer, parse_mode=ParseMode.HTML)
-                message_buffer = ""
+                message_buffer = "" # تفريغ المخزن
             message_buffer += ayah_text
         
+        # إرسال ما تبقى في المخزن
         if message_buffer:
             keyboard = [[InlineKeyboardButton("🔙 العودة للسور", callback_data='quran_list' if mode == 'read' else 'tafsir_list')]]
             await query.message.reply_text(message_buffer, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
@@ -154,14 +172,13 @@ async def show_surah_content(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
 # --- قسم الصوت ---
 
-# تم تعديل هذا السطر لاستخدام RECORD_AUDIO بدلاً من UPLOAD_AUDIO لمنع الخطأ
-@send_action(ChatAction.RECORD_AUDIO) 
+@send_action(ChatAction.UPLOAD_AUDIO) 
 async def show_audio_list(update: Update, context: ContextTypes.DEFAULT_TYPE, page=0):
     query = update.callback_query
     await query.answer()
     
     try:
-        response = requests.get(f"{QURAN_API_BASE}/surah")
+        response = await http_get(f"{QURAN_API_BASE}/surah")
         if response.status_code != 200: raise Exception("API Error")
         
         surahs = response.json()['data']
@@ -188,21 +205,24 @@ async def show_audio_list(update: Update, context: ContextTypes.DEFAULT_TYPE, pa
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text("🎧 اختر السورة للاستماع بصوت الشيخ مشاري العفاسي:", reply_markup=reply_markup)
     except Exception as e:
+        logging.error(e)
         await query.edit_message_text("❌ خطأ في تحميل القائمة الصوتية.")
 
-# تم تعديل هذا السطر أيضاً
-@send_action(ChatAction.RECORD_AUDIO)
+@send_action(ChatAction.UPLOAD_AUDIO)
 async def send_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, surah_number):
     query = update.callback_query
     await query.answer("جاري إرسال التلاوة...")
     
     try:
+        # استخدام رابط مباشر موثوق
         audio_url = f"https://cdn.islamic.network/quran/audio-surah/128/ar.alafasy/{surah_number}.mp3"
         surah_name = f"سورة رقم {surah_number}"
         
+        # محاولة جلب اسم السورة عربي
         try:
-            res = requests.get(f"{QURAN_API_BASE}/surah/{surah_number}").json()['data']
-            surah_name = res['name']
+            res = await http_get(f"{QURAN_API_BASE}/surah/{surah_number}")
+            data = res.json()['data']
+            surah_name = data['name']
         except:
             pass
             
@@ -213,6 +233,7 @@ async def send_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, surah_n
             parse_mode=ParseMode.HTML
         )
     except Exception as e:
+        logging.error(e)
         await query.message.reply_text("❌ عذراً، لم نتمكن من تحميل الملف الصوتي.")
 
 # --- آية عشوائية ---
@@ -223,7 +244,7 @@ async def random_ayah(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     try:
-        response = requests.get(f"{QURAN_API_BASE}/ayah/random/ar.alafasy")
+        response = await http_get(f"{QURAN_API_BASE}/ayah/random/ar.alafasy")
         if response.status_code != 200: raise Exception("API Error")
         
         data = response.json()['data']
@@ -239,15 +260,21 @@ async def random_ayah(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        # التحقق من نوع الرسالة لتجنب الأخطاء
-        if query.message.text:
-            await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-        else:
+        # محاولة التعديل، وإذا فشلت نرسل رسالة جديدة
+        try:
+            if query.message.text:
+                await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+            else:
+                await query.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+        except Exception:
             await query.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
             
     except Exception as e:
         logging.error(e)
-        await query.edit_message_text("❌ حدث خطأ في جلب الآية.")
+        try:
+            await query.edit_message_text("❌ حدث خطأ في جلب الآية.")
+        except:
+            await query.message.reply_text("❌ حدث خطأ في جلب الآية.")
 
 # --- قسم الأذكار ---
 
@@ -273,20 +300,28 @@ async def show_azkar_content(update: Update, context: ContextTypes.DEFAULT_TYPE,
     await query.answer()
     
     try:
-        response = requests.get(AZKAR_API_URL)
+        response = await http_get(AZKAR_API_URL)
         if response.status_code != 200: raise Exception("API Azkar Error")
         
         azkar_data = response.json()
-        category_azkar = azkar_data.get(category, [])
         
-        if not category_azkar:
+        # --- التصحيح الجوهري هنا ---
+        # الـ API يعيد قائمة من الكائنات، كل كائن يحتوي على 'category' و 'array'
+        # لذا يجب البحث داخل القائمة عن الفئة المطلوبة
+        target_list = []
+        for item in azkar_data:
+            if item.get('category') == category:
+                target_list = item.get('array', [])
+                break
+        
+        if not target_list:
             await query.edit_message_text("❌ لم يتم العثور على أذكار لهذه الفئة.")
             return
 
         text = f"📿 <b>{category}</b>\n\n"
         message_buffer = text
         
-        for idx, item in enumerate(category_azkar, 1):
+        for idx, item in enumerate(target_list, 1):
             zkr_text = (
                 f"━━━━━━━━━━━━━━━\n"
                 f"<b>❝ الذكر رقم {idx} ❞</b>\n"
@@ -322,13 +357,14 @@ async def handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('state') == 'searching':
         keyword = update.message.text
         try:
-            response = requests.get(f"{QURAN_API_BASE}/search/{keyword}/all/ar.alafasy")
+            response = await http_get(f"{QURAN_API_BASE}/search/{keyword}/all/ar.alafasy")
             
             if response.status_code != 200: raise Exception("Search Error")
             
             data = response.json()
             results = []
-            if data.get('data'):
+            # التحقق من وجود البيانات في الاستجابة
+            if data.get('data') and isinstance(data['data'], dict):
                 results = data['data'].get('matches', [])
 
             if not results:
@@ -337,6 +373,7 @@ async def handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"✅ <b>تم العثور على {len(results)} نتيجة</b> لـ '<i>{keyword}</i>':\n", parse_mode=ParseMode.HTML)
                 
                 message_buffer = ""
+                # عرض أول 10 نتائج فقط
                 for res in results[:10]: 
                     res_text = (
                         f"📖 {res['text']}\n"
@@ -409,11 +446,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await random_ayah(update, context)
 
 if __name__ == '__main__':
-    app = ApplicationBuilder().token(TOKEN).build()
-    
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_search))
-    
-    print("✅ البوت يعمل الآن...")
-    app.run_polling()
+    # تأكد من وضع التوكن الصحيح في الأعلى
+    if TOKEN == "YOUR_BOT_TOKEN_HERE":
+        print("❌ الرجاء وضع التوكن الخاص بك في الكود.")
+    else:
+        app = ApplicationBuilder().token(TOKEN).build()
+        
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CallbackQueryHandler(button_handler))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_search))
+        
+        print("✅ البوت يعمل الآن...")
+        app.run_polling()
