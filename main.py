@@ -17,7 +17,8 @@ AZKAR_API_URL = "https://raw.githubusercontent.com/nawafalqari/azkar-api/master/
 
 # --- دوال مساعدة ---
 
-async def send_action(action: ChatAction):
+# تم إصلاح الـ Decorator ليكون دالة عادية وليست async
+def send_action(action: ChatAction):
     """ديكوراتور لإظهار حالة التحميل"""
     def decorator(func):
         async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -413,5 +414,5 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_search))
     
-    print("✅ البوت يعمل الآن مع الواجهة المحسنة والمنظمة...")
+    print("✅ البوت يعمل الآن...")
     app.run_polling()
